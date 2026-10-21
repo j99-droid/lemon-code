@@ -17,16 +17,18 @@ npm start
 ```
 Or double-click **LemonCode** on the Desktop (`npm run shortcut` makes it).
 
-LemonCode runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. If Claude Code
-isn't installed, the home page has an Install button, which runs Anthropic's official installer
-(`irm https://claude.ai/install.ps1 | iex`). The first session asks you to sign in with your Claude account.
+LemonCode runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. The first start
+opens **Getting started** on the home page. Pick **Claude account**, or **Claude + local helpers** (see below). It
+checks Claude Code and Ollama and offers an Install button for each one that's missing. Claude Code's button runs
+Anthropic's official installer (`irm https://claude.ai/install.ps1 | iex`), and the first session asks you to sign
+in with your Claude account. Reopen the panel any time from ⋯ → Getting started.
 
 Citron's reactions come from a small hook server that LemonCode starts on `127.0.0.1` (a random local port). Only
 sessions LemonCode starts are sent to it, but it has no password, so other programs on your PC could post to it.
 
 ## Local helpers (optional)
 A helper can run on a model on your PC instead of Claude. It needs [Ollama](https://ollama.com) (0.14 or newer) and
-the Qwen3 Coder model, made once:
+the Qwen3 Coder model. Getting started installs Ollama with winget and downloads the model for you, or do it by hand:
 ```
 ollama pull qwen3-coder:30b
 ollama create lemon-qwen3-coder -f tools/local-model/Modelfile
@@ -76,6 +78,8 @@ tray after install). The model needs about 19 GB of disk and runs best with 16 G
 | `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
 | `src/router.js` | Local model router: sends a local helper's calls to Ollama, the rest to Anthropic |
 | `test/router.test.js` | Tests for where the router sends each call (`npm test`) |
+| `src/setup.js` | Getting started checks: Claude Code, Ollama and the local model, and the install and pull commands |
+| `test/setup.test.js` | Tests for what counts as ready and how Ollama's answer is read (`npm test`) |
 | `tools/local-model/Modelfile` | Makes the `lemon-qwen3-coder` model with a 32K context (see Local helpers) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |
 | `src/templates.js` | Folder naming, prompt building, AGENTS.md skeleton |

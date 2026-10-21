@@ -174,6 +174,7 @@
   function goPage(v) {
     view = v;
     show(null);
+    if (v === 'home') refreshSetup();
     ({ home: renderHome, agents: renderAgents, recent: renderRecent, archive: renderArchive })[v]();
   }
   const goHome = () => goPage('home');
@@ -328,8 +329,14 @@
   $('tabs').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) show(b.dataset.id); };
   $('homeTab').onclick = () => { picked.clear(); goHome(); askBox.focus(); };
   $('menuBtn').onclick = (e) => { e.stopPropagation(); $('menu').hidden = !$('menu').hidden; };
-  $('menu').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { $('menu').hidden = true; goPage(b.dataset.view); } };
+  $('menu').onclick = (e) => {
+    if (e.target.closest('[data-setup]')) { $('menu').hidden = true; setupOpen = true; return goHome(); }
+    const b = e.target.closest('[data-view]');
+    if (b) { $('menu').hidden = true; goPage(b.dataset.view); }
+  };
   document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) $('menu').hidden = true; });
+  // Finishing an install in a terminal tab, then coming back, should show the new state.
+  window.addEventListener('focus', () => { if (!active && view === 'home') refreshSetup(); });
 
   // ---- mood machine --------------------------------------------------------
   // States per tab; Citron shows the active tab, unless another tab needs you.
@@ -495,8 +502,71 @@
   const pickedAgents = new Set(config.lastAgents.filter((id) => config.agents.some((a) => a.id === id)));
   const askBox = $('askBox');
 
+  // ---- getting started: which setup, and what it still needs -----------------
+  // Opens on the first start and whenever the chosen setup isn't ready. Close hides it until the next start,
+  // and the menu's Getting started brings it back.
+  const SETUP_MODES = [
+    { id: 'claude', name: 'Claude account', text: 'Sign in with your Claude plan. Everything runs on Claude.' },
+    { id: 'local-helpers', name: 'Claude + local helpers', text: 'Claude as usual, and helpers that run a model on this PC through Ollama.' },
+  ];
+  let setupMode = config.setup;
+  let setupStatus = null; // from setup:status: { claude, ollama: { installed, running, modelReady }, ready }
+  let setupOpen = false;
+  let setupChecked = false;
+
+  const stepRow = (done, title, note, action) => `<div class="step ${done ? 'done' : ''}"><span class="tick"></span>`
+    + `<div class="step-text"><strong>${esc(title)}</strong><span>${esc(note)}</span></div>`
+    + `<div class="step-action">${done ? '' : action}</div></div>`;
+  function setupSteps() {
+    const s = setupStatus, o = s.ollama;
+    const claude = stepRow(s.claude, 'Claude Code', 'Sign in with your Claude account the first time a project starts.',
+      '<button class="btn primary" data-do="claude">Install Claude Code</button>');
+    if (setupMode === 'claude') return claude;
+    const ollamaNote = o.installed && o.running ? 'Running.'
+      : o.installed ? 'Installed, but not running. Start Ollama from the Start menu.'
+        : 'Runs the helper models on this PC. Free, and nothing leaves the PC.';
+    const ollamaAction = o.installed ? ''
+      : '<button class="btn primary" data-do="ollama">Install Ollama</button><button class="linkish" data-do="ollama-page">Download page</button>';
+    const ollama = stepRow(o.installed && o.running, 'Ollama', ollamaNote, ollamaAction);
+    const model = stepRow(o.modelReady, 'Qwen3 Coder model', 'About 19 GB, downloaded once.',
+      `<button class="btn primary" data-do="model" ${o.running ? '' : 'disabled'}>Download model</button>`);
+    return claude + ollama + model;
+  }
+  function renderSetup() {
+    const card = $('setupCard');
+    card.hidden = !setupOpen || !setupStatus;
+    if (card.hidden) return;
+    const modes = SETUP_MODES.map((m) => `<button class="mode ${m.id === setupMode ? 'on' : ''}" data-mode="${m.id}">`
+      + `<strong>${esc(m.name)}</strong><small>${esc(m.text)}</small></button>`).join('');
+    card.innerHTML = '<h2>Getting started</h2>'
+      + '<p>How should your Claude run? You can change this later under ⋯ → Getting started.</p>'
+      + `<div class="modes">${modes}</div>`
+      + `<div class="steps">${setupMode ? setupSteps() : '<span class="hint">Pick one to see what it needs.</span>'}</div>`
+      + '<div class="setup-foot">'
+      + `<span class="hint">${setupStatus.ready ? 'All set.' : ''}</span>`
+      + '<button class="btn" data-do="check">Check again</button>'
+      + `<button class="btn" data-do="close">${setupStatus.ready ? 'Close' : 'Later'}</button></div>`;
+  }
+  async function refreshSetup() {
+    setupStatus = await api.setupStatus(setupMode);
+    if (!setupChecked) { setupChecked = true; setupOpen = !setupStatus.ready; }
+    renderSetup();
+  }
+  $('setupCard').onclick = async (e) => {
+    const pick = e.target.closest('[data-mode]');
+    if (pick) { setupMode = await api.chooseSetup(pick.dataset.mode); return refreshSetup(); }
+    const b = e.target.closest('[data-do]');
+    if (!b) return;
+    const what = b.dataset.do;
+    if (what === 'close') { setupOpen = false; return renderSetup(); }
+    if (what === 'check') return refreshSetup();
+    if (what === 'ollama-page') return api.openOllamaPage();
+    const run = { claude: () => api.installClaude(), ollama: () => api.installOllama(), model: () => api.pullModel() }[what];
+    launch(run());
+  };
+
   function renderHome() {
-    $('setupCard').hidden = !!boot.claude;
+    renderSetup();
     const tpl = config.templates;
     const card = (t) => `<button class="card ${picked.has(t.id) ? 'on' : ''}" data-k="${t.id}"><span class="tick"></span>`
       + `<span class="big">${esc(t.icon || '✨')}</span><strong>${esc(t.name)}</strong>`
@@ -558,7 +628,6 @@
   askBox.oninput = fitAsk;
   askBox.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); startProject(); } };
   $('askGo').onclick = startProject;
-  $('installBtn').onclick = () => launch(api.installClaude());
 
   // ---- agents page -----------------------------------------------------------
   function renderAgents() {

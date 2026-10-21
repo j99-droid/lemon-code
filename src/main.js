@@ -11,6 +11,7 @@ const { ChatFeed } = require('./chat');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 const { MODELS, EFFORTS, DEFAULT_MODEL, DEFAULT_EFFORT } = require('./power');
 const { startRouter, LOCAL_MODEL } = require('./router');
+const setup = require('./setup');
 
 const ROOT = path.join(__dirname, '..');
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
@@ -37,12 +38,14 @@ const DEFAULTS = {
   lastAgents: [], // helpers picked on the home page last time
   sessionAgents: {}, // session id -> agent ids, so a resumed session gets its helpers back
   claudePath: null,
+  setup: null, // Getting started choice: one of MODES in setup.js. null = not chosen yet
 };
 let config = { ...DEFAULTS };
 try { config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) }; } catch { /* first run */ }
 // Configs from before the sliders stored "default" (no flag was passed). Those become the slider defaults.
 if (!MODELS.includes(config.model)) config.model = DEFAULT_MODEL;
 if (!EFFORTS.includes(config.effort)) config.effort = DEFAULT_EFFORT;
+if (!setup.MODES.includes(config.setup)) config.setup = null;
 const saveConfig = () => {
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
@@ -154,7 +157,7 @@ function cleanEnv() {
 
 function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   const exe = claudeExe();
-  if (!exe) throw new Error("Claude Code isn't installed yet. Use the Install button on the home page.");
+  if (!exe) throw new Error("Claude Code isn't installed yet. Open Getting started on the home page to install it.");
   const args = ['--settings', HOOKS_FILE];
   args.push('--model', config.model, '--effort', config.effort);
   if (config.mode && config.mode !== 'default') args.push('--permission-mode', config.mode);
@@ -367,6 +370,32 @@ ipcMain.handle('claude:install', () => attempt(() => spawnTerminal({
   title: 'Install Claude Code', file: 'powershell.exe',
   args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'irm https://claude.ai/install.ps1 | iex'],
 })));
+
+// Getting started (the home page panel). The panel asks again on each check, so a finished install shows up.
+ipcMain.handle('setup:status', async (_e, mode) => {
+  const status = { claude: !!claudeExe(), ollama: await setup.ollamaStatus() };
+  return { ...status, ready: setup.isReady(mode, status) };
+});
+ipcMain.handle('setup:choose', (_e, mode) => {
+  if (!setup.MODES.includes(mode)) throw new Error(`Unknown setup "${mode}".`);
+  config.setup = mode;
+  saveConfig();
+  return mode;
+});
+// Winget installs Ollama; the terminal stays open afterwards so the result can be read.
+ipcMain.handle('setup:install-ollama', () => attempt(() => spawnTerminal({
+  title: 'Install Ollama', file: 'powershell.exe',
+  args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', setup.OLLAMA_INSTALL_COMMAND],
+})));
+ipcMain.handle('setup:open-ollama-page', () => shell.openExternal(setup.OLLAMA_DOWNLOAD_PAGE));
+ipcMain.handle('setup:pull-model', () => attempt(() => {
+  const exe = setup.ollamaExe();
+  if (!exe) throw new Error("Ollama isn't installed yet. Install it first, then press Check again.");
+  return spawnTerminal({
+    title: 'Local model', file: 'powershell.exe',
+    args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', setup.modelSetupScript(exe)],
+  });
+}));
 
 ipcMain.handle('templates:save', (_e, t) => {
   const tpl = {

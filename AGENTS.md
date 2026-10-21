@@ -46,6 +46,12 @@ project templates. How it works and the file map: README.md.
   ("Waiting for helpers…") until each started helper's `SubagentStop` (`agent_type`) arrives. `SubagentStop`
   also fires for internal subagents with no `agent_type`, and `SubagentHandback` / `SendFeedback` are internal
   tools: ignore them.
+- Getting started's Ollama row is done only when Ollama is both installed and running: a server can answer on
+  port 11434 from somewhere else, so "running" alone says nothing about the program.
+- Getting started's model step runs Ollama by its full install path: a terminal opened after the winget install
+  still has the old PATH.
+- Getting started offers no local-only mode: the main session always runs on Claude (see the router rule above),
+  so it would still need a sign-in.
 - Shift+Enter is sent as ESC+CR, which Claude Code treats as a newline.
 - Ctrl+V pastes text itself; with no text on the clipboard it sends a raw Ctrl+V so Claude can grab an image.
 - The data folder follows package.json's `name`. It was `%APPDATA%\lemon-code` before the LemonCode rename;

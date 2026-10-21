@@ -181,11 +181,30 @@ select { font: inherit; }
 .card.add { border-style: dashed; color: var(--muted); display: flex; flex-direction: column; justify-content: center; }
 .card.add:hover { color: var(--lemon); border-color: var(--lemon); }
 .setup {
-  width: min(720px, 100%); display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
-  padding: 18px 20px; margin-bottom: 26px; border-radius: 16px; background: #2a1f12; border: 1px solid #6b4a1c;
+  width: min(720px, 100%); display: flex; flex-direction: column; gap: 14px;
+  padding: 18px 20px; margin: 0 0 26px; border-radius: 16px; background: #2a1f12; border: 1px solid #6b4a1c;
 }
-.setup span { color: var(--muted); }
-.setup .btn { margin-top: 6px; }
+.setup h2 { margin: 0; font-size: 18px; }
+.setup p, .setup .hint { color: var(--muted); margin: 0; font-size: 13px; }
+.setup .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.setup .mode {
+  display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px; border-radius: 12px;
+  background: var(--panel2); border: 1px solid transparent;
+}
+.setup .mode:hover { border-color: var(--panel3); }
+.setup .mode.on { border-color: var(--lemon); background: #23200f; }
+.setup .mode small { color: var(--muted); font-size: 12.5px; }
+.setup .steps { display: flex; flex-direction: column; gap: 8px; }
+.setup .step {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--panel);
+}
+.setup .step-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.setup .step-text span { color: var(--muted); font-size: 12.5px; }
+.setup .step-action { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.setup .step .tick { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--faint); flex: none; }
+.setup .step.done .tick { background: var(--green); border-color: var(--green); }
+.setup .setup-foot { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.setup .setup-foot .hint { margin-right: auto; }
 .rows { width: min(720px, 100%); display: flex; flex-direction: column; gap: 8px; }
 .arow .badges { display: flex; gap: 6px; margin-top: 6px; }
 .modal select {
