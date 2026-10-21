@@ -348,6 +348,7 @@ ipcMain.handle('app:init', () => ({
   sessions: usage.listSessions(),
   usage: usage.summary(),
   claude: claudeExe(),
+  version: app.getVersion(),
 }));
 ipcMain.handle('sessions:list', () => usage.listSessions());
 ipcMain.handle('config:set', (_e, patch) => { config = { ...config, ...patch }; saveConfig(); return config; });

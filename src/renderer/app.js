@@ -7,6 +7,7 @@
   let config = boot.config;
   let usage = boot.usage;
   let sessions = boot.sessions;
+  $('stripVersion').textContent = `v${boot.version}`;
 
   // ---- helpers -------------------------------------------------------------
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
