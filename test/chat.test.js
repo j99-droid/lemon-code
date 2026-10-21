@@ -1,7 +1,10 @@
 // Run with `npm test`. Checks which transcript lines the chat view shows.
 const test = require('node:test');
 const assert = require('node:assert');
-const { chatMessage } = require('../src/chat');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { chatMessage, ChatFeed } = require('../src/chat');
 
 const line = (o) => JSON.stringify({ uuid: 'u1', ...o });
 
@@ -30,10 +33,16 @@ test('tool results, helper work, meta and command echoes are hidden', () => {
   for (const o of hidden) assert.strictEqual(chatMessage(line(o)), null, JSON.stringify(o));
 });
 
-test("Claude's questions show as a bubble marked ask", () => {
-  const m = chatMessage(line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'AskUserQuestion',
-    input: { questions: [{ question: 'Which colour?' }, { question: 'How big?' }] } }] } }));
-  assert.deepStrictEqual(m, { id: 'u1', role: 'assistant', text: 'Which colour?\n\nHow big?', ask: true });
+test("Claude's questions come with their options, so the chat can show a card", () => {
+  const m = chatMessage(line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'AskUserQuestion',
+    input: { questions: [{ question: 'Which colour?', header: 'Colour', multiSelect: false,
+      options: [{ label: 'Red', description: 'warm', preview: '<b>red</b>' }, { label: 'Blue' }] }, { question: 'How big?' }] } }] } }));
+  assert.strictEqual(m.ask, true);
+  assert.strictEqual(m.toolUseId, 'toolu_1');
+  assert.strictEqual(m.text, 'Which colour?\n\nHow big?');
+  assert.deepStrictEqual(m.questions[0], { question: 'Which colour?', header: 'Colour', multiSelect: false,
+    options: [{ label: 'Red', description: 'warm', preview: '<b>red</b>' }, { label: 'Blue', description: '', preview: null }] });
+  assert.deepStrictEqual(m.questions[1].options, []);
 });
 
 test('an interrupt is a note, and bad lines are ignored', () => {
@@ -44,10 +53,6 @@ test('an interrupt is a note, and bad lines are ignored', () => {
 });
 
 test('a line split mid-character across two reads comes out whole', () => {
-  const fs = require('fs');
-  const os = require('os');
-  const path = require('path');
-  const { ChatFeed } = require('../src/chat');
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-chat-')), 's.jsonl');
   const bytes = Buffer.from(`${line({ type: 'user', message: { content: 'lemon 🍋 time' } })}\n`);
   const cut = bytes.indexOf(Buffer.from('🍋')) + 2; // inside the emoji's four bytes
@@ -60,4 +65,70 @@ test('a line split mid-character across two reads comes out whole', () => {
   fs.appendFileSync(file, bytes.subarray(cut));
   feed.read();
   assert.deepStrictEqual(seen.map((m) => m.text), ['lemon 🍋 time']);
+});
+
+// Helper runs live in the session's subagents folder, next to its transcript.
+const at = (sec) => `2026-10-21T10:00:${String(sec).padStart(2, '0')}.000Z`;
+const row = (o) => `${JSON.stringify(o)}\n`;
+const helperSetup = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-helpers-'));
+  const sub = path.join(dir, 's1', 'subagents');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(dir, 's1.jsonl'), row({ uuid: 'm1', timestamp: at(0), type: 'user', message: { role: 'user', content: 'count files' } }));
+  return { file: path.join(dir, 's1.jsonl'), sub };
+};
+const identify = (type) => (type === 'researcher' ? { key: 'researcher', name: 'Researcher', icon: '🔎' } : null);
+
+test('a helper shows its task, what it does, what it says and when it finishes, in time order', () => {
+  const { file, sub } = helperSetup();
+  fs.writeFileSync(path.join(sub, 'agent-a1.meta.json'), JSON.stringify({ agentType: 'researcher', description: 'Count files', finished: true }));
+  fs.writeFileSync(path.join(sub, 'agent-a1.jsonl'),
+    row({ uuid: 'h0', timestamp: at(1), isSidechain: true, type: 'user', message: { role: 'user', content: 'Count the files' } })
+    + row({ uuid: 'h1', timestamp: at(2), isSidechain: true, type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'tool_use', id: 't1', name: 'Bash', input: { description: 'List files' } }] } })
+    + row({ uuid: 'h2', timestamp: at(3), isSidechain: true, type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'text', text: 'Found 5 files.' }, { type: 'tool_use', id: 't2', name: 'SubagentHandback', input: { message: 'Total: 5' } }] } }));
+  const feed = new ChatFeed('s1', identify);
+  feed.file = file;
+  const seen = [];
+  feed.on('messages', (m) => seen.push(...m));
+  feed.read();
+  assert.deepStrictEqual(seen.map((m) => [m.role, m.kind || null, m.text]), [
+    ['user', null, 'count files'],
+    ['helper', 'start', 'Count files'],
+    ['helper', 'tool', 'Running: List files'],
+    ['helper', 'text', 'Found 5 files.'],
+    ['helper', 'text', 'Total: 5'],
+    ['helper', 'done', ''],
+  ]);
+  assert.deepStrictEqual(seen[1].helper, { run: 'a1', key: 'researcher', name: 'Researcher', icon: '🔎' });
+});
+
+test('a helper file is not read until its meta file says which helper it is', () => {
+  const { file, sub } = helperSetup();
+  fs.writeFileSync(path.join(sub, 'agent-a2.jsonl'), row({ uuid: 'h0', timestamp: at(1), isSidechain: true, type: 'user', message: { role: 'user', content: 'Count' } }));
+  const feed = new ChatFeed('s1', identify);
+  feed.file = file;
+  const seen = [];
+  feed.on('messages', (m) => seen.push(...m));
+  feed.read();
+  assert.deepStrictEqual(seen.map((m) => m.role), ['user']);
+  fs.writeFileSync(path.join(sub, 'agent-a2.meta.json'), JSON.stringify({ agentType: 'helper-x', description: 'Later', finished: false }));
+  feed.read();
+  assert.deepStrictEqual(seen.filter((m) => m.role === 'helper').map((m) => [m.kind, m.helper.name]), [['start', 'helper-x']]);
+});
+
+test('a subagent that is not one of your helpers is named by its type, and feedback to Claude is hidden', () => {
+  const { file, sub } = helperSetup();
+  fs.writeFileSync(path.join(sub, 'agent-a3.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'Look', finished: false }));
+  fs.writeFileSync(path.join(sub, 'agent-a3.jsonl'),
+    row({ uuid: 'h0', timestamp: at(1), isSidechain: true, type: 'user', message: { role: 'user', content: 'Look' } })
+    + row({ uuid: 'h1', timestamp: at(2), isSidechain: true, type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'tool_use', id: 't3', name: 'SendFeedback', input: { message: 'hi' } }] } }));
+  const feed = new ChatFeed('s1', identify);
+  feed.file = file;
+  const seen = [];
+  feed.on('messages', (m) => seen.push(...m));
+  feed.read();
+  assert.deepStrictEqual(seen.filter((m) => m.role === 'helper').map((m) => [m.kind, m.helper.name]), [['start', 'Explore']]);
 });

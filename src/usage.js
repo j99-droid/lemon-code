@@ -25,6 +25,24 @@ function fiveHourWindow(entries, now) {
   return { start, end: start + WINDOW_MS, main };
 }
 
+// Token totals for the entries from `since` on. Cache reads are shown but left out of main, as in the meter.
+function windowTotals(entries, since) {
+  const totals = { start: since, main: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, sessions: 0, byModel: {} };
+  const sessionIds = new Set();
+  for (const e of entries) {
+    if (e.ts < since) continue;
+    const main = e.input + e.output + e.cacheWrite;
+    totals.main += main;
+    totals.input += e.input; totals.output += e.output;
+    totals.cacheWrite += e.cacheWrite; totals.cacheRead += e.cacheRead;
+    const model = e.model || 'unknown';
+    totals.byModel[model] = (totals.byModel[model] || 0) + main;
+    if (e.session) sessionIds.add(e.session);
+  }
+  totals.sessions = sessionIds.size;
+  return totals;
+}
+
 class Usage extends EventEmitter {
   constructor() {
     super();
@@ -95,6 +113,7 @@ class Usage extends EventEmitter {
     const entry = {
       ts: Date.parse(j.timestamp),
       session: j.sessionId,
+      model: m.model,
       local: m.model === LOCAL_MODEL,
       input: u.input_tokens || 0,
       output: u.output_tokens || 0,
@@ -115,10 +134,10 @@ class Usage extends EventEmitter {
   }
 
   // main = input + output + cache writes. Cache reads are cheap and reported separately.
-  summary() {
+  // starts = { fiveHour, week }: the window start times (ms) from the status line's reset times, or null.
+  summary(starts = {}) {
     const now = Date.now();
     const today = dayKey(now);
-    const days = {};
     const sessions = {};
     const entries = [...this.messages.values()].sort((a, b) => a.ts - b.ts);
     const zero = () => ({ main: 0, cacheRead: 0, input: 0, output: 0, cacheWrite: 0 });
@@ -130,37 +149,21 @@ class Usage extends EventEmitter {
     const local = entries.filter((e) => e.local);
     const localToday = zero();
     for (const e of entries) if (e.local && dayKey(e.ts) === today) add(localToday, e);
+    const todayTotals = zero();
     for (const e of claude) {
-      const k = dayKey(e.ts);
-      add(days[k] || (days[k] = zero()), e);
+      if (dayKey(e.ts) === today) add(todayTotals, e);
       if (e.session) sessions[e.session] = (sessions[e.session] || 0) + e.input + e.output + e.cacheWrite;
     }
 
-    // Past days, newest first, today excluded.
-    const past = [];
-    for (let i = 1; i <= 14; i++) {
-      const k = dayKey(now - i * DAY_MS);
-      past.push({ day: k, main: days[k] ? days[k].main : 0 });
-    }
-    const avg7 = past.slice(0, 7).reduce((s, d) => s + d.main, 0) / 7;
-    const active14 = past.filter((d) => d.main > 0);
-    const avg14active = active14.length ? active14.reduce((s, d) => s + d.main, 0) / active14.length : 0;
-
-    const win = fiveHourWindow(claude, now);
-    const localWindow = fiveHourWindow(local, now);
-
-    const t = days[today] || zero();
-    const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
-    const hours = Math.max(1, (now - midnight.getTime()) / 3600000);
+    const guessedFiveHour = fiveHourWindow(claude, now);
+    const fiveHourStart = starts.fiveHour != null ? starts.fiveHour : guessedFiveHour && guessedFiveHour.start;
+    const weekStart = starts.week != null ? starts.week : null;
     return {
-      today: t,
+      today: todayTotals,
       localToday,
-      localWindow,
-      projection: Math.round((t.main / hours) * 24),
-      avg7: Math.round(avg7),
-      avg14active: Math.round(avg14active),
-      history: past.slice(0, 7).reverse(),
-      window: win,
+      localWindow: fiveHourWindow(local, now),
+      fiveHour: fiveHourStart != null ? windowTotals(claude, fiveHourStart) : null,
+      week: weekStart != null ? windowTotals(claude, weekStart) : null,
       sessions,
       at: now,
     };

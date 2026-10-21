@@ -31,7 +31,22 @@ test('a day with only local calls shows no Claude usage', () => {
   usage.ingest(line(LOCAL_MODEL, 'm3'));
   const s = usage.summary();
   assert.strictEqual(s.today.main, 0);
-  assert.strictEqual(s.window, null);
+  assert.strictEqual(s.fiveHour, null);
   assert.strictEqual(s.localToday.main, 125);
   assert.strictEqual(s.localWindow.main, 125);
+});
+
+test('a window counts only entries from its start and splits them by model', () => {
+  const usage = new Usage();
+  const hourMs = 3600 * 1000;
+  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * hourMs).toISOString();
+  const old = JSON.parse(line('claude-haiku-5-5', 'old'));
+  old.timestamp = at(10);
+  usage.ingest(JSON.stringify(old));
+  usage.ingest(line('claude-haiku-5-5', 'm4'));
+  usage.ingest(line('claude-opus-5', 'm5', { output_tokens: 80 }));
+  const s = usage.summary({ fiveHour: Date.now() - 5 * hourMs });
+  assert.strictEqual(s.fiveHour.main, 125 + 185);
+  assert.deepStrictEqual(s.fiveHour.byModel, { 'claude-haiku-5-5': 125, 'claude-opus-5': 185 });
+  assert.strictEqual(s.week, null);
 });

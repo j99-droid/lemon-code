@@ -10,7 +10,7 @@
   $('stripVersion').textContent = `v${boot.version}`;
 
   // ---- helpers -------------------------------------------------------------
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const { esc } = ChatView;
   const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n));
   const base = (p) => (p ? String(p).split(/[\\/]/).filter(Boolean).pop() : '');
   const ago = (t) => {
@@ -99,8 +99,9 @@
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       if (e.key === 'Enter' && e.shiftKey) { api.write(id, '\x1b\r'); return false; } // newline in Claude's prompt
-      if (e.key === 'Escape' && t.autoTerminal) { // denying an approval fires no hook, so treat Esc as the answer
+      if (e.key === 'Escape' && (t.autoTerminal || t.asks.size)) { // denying or cancelling fires no hook, so Esc is the answer
         t.waiting.clear(); t.waitingOther = false;
+        for (const askId of [...t.asks]) endAsk(t, askId, 'Cancelled in the terminal');
         setTimeout(() => backToChat(id), 300);
       }
       if (e.ctrlKey && e.key === 'c' && term.hasSelection()) {
@@ -117,11 +118,13 @@
     new ResizeObserver(() => { if (el.offsetParent) { try { fit.fit(); } catch { /* hidden */ } } }).observe(el);
     const chatEl = document.createElement('div');
     chatEl.className = 'chat-tab';
+    chatEl.dataset.tab = id;
     chatEl.innerHTML = '<div class="chat-empty">Starting Claude…</div>';
     $('chatLog').appendChild(chatEl);
+    // asks: tool call ids of question dialogs open in Claude now, answered from their card in the chat.
     const t = { term, fit, el, chatEl, title, cwd, state: 'idle', sessionId: sessionId || null, toolTimer: null,
       agents: agents || [], busy: {}, mode: 'chat', autoTerminal: false, started: false, status: '', shown: 0,
-      waiting: new Set(), waitingOther: false, running: new Map() };
+      waiting: new Set(), waitingOther: false, running: new Map(), asks: new Set() };
     tabs.set(id, t);
     // Sign-in and "trust this folder?" happen in the terminal before any hook fires, so if Claude hasn't
     // started after a few seconds it's probably waiting there.
@@ -183,49 +186,20 @@
   const chatBox = $('chatBox');
   const BUSY = new Set(['thinking', 'typing', 'coding', 'focused']);
 
-  // Enough Markdown for Claude's replies: code blocks, inline code, bold, headings, lists, tables, links.
-  // Text is escaped before any tags are added, so nothing in a transcript can inject HTML.
-  const inline = (s) => esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-
-  function markdown(text) {
-    return text.split(/```[^\n]*\n?([\s\S]*?)```/g).map((part, i) => (i % 2
-      ? `<pre><code>${esc(part.replace(/\n$/, ''))}</code></pre>`
-      : markdownBlocks(part))).join('');
+  // A question card takes answers only while its dialog is open in Claude. Once it closes, the card says how.
+  const askCard = (t, toolUseId) => t.chatEl.querySelector(`[data-ask="${CSS.escape(toolUseId)}"]`);
+  function openAsk(t, toolUseId) {
+    t.asks.add(toolUseId);
+    const card = askCard(t, toolUseId);
+    if (card) card.classList.add('live');
   }
-  function markdownBlocks(text) {
-    const html = [];
-    let open = null; // 'ul', 'ol' or 'table' while inside one
-    const close = () => { if (open) html.push(`</${open}>`); open = null; };
-    const enter = (tag) => { if (open !== tag) { close(); open = tag; html.push(`<${tag}>`); } };
-    for (const line of text.split('\n')) {
-      if (!line.trim()) continue; // blank lines between list items shouldn't restart the numbering
-      const item = line.match(/^\s*(?:([-*])|\d+[.)])\s+(.*)/);
-      const heading = line.match(/^#{1,4}\s+(.*)/);
-      if (line.trim().startsWith('|')) {
-        enter('table');
-        if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) continue; // the |---|---| row under the header
-        const cells = line.trim().replace(/^\||\|$/g, '').split('|');
-        html.push(`<tr>${cells.map((c) => `<td>${inline(c.trim())}</td>`).join('')}</tr>`);
-      } else if (item) {
-        enter(item[1] ? 'ul' : 'ol');
-        html.push(`<li>${inline(item[2])}</li>`);
-      } else {
-        close();
-        html.push(heading ? `<h4>${inline(heading[1])}</h4>` : `<p>${inline(line)}</p>`);
-      }
-    }
-    close();
-    return html.join('');
+  function endAsk(t, toolUseId, text) {
+    t.asks.delete(toolUseId);
+    const card = askCard(t, toolUseId);
+    if (!card) return;
+    card.classList.remove('live');
+    card.querySelector('.q-state').textContent = text;
   }
-
-  const bubbleHtml = (m) => {
-    if (m.role === 'note') return `<div class="msg note">${esc(m.text)}</div>`;
-    if (m.role === 'user') return `<div class="msg user">${esc(m.text)}</div>`;
-    return `<div class="msg assistant${m.ask ? ' question' : ''}">${markdown(m.text)}</div>`;
-  };
 
   const chatAtEnd = () => { const log = $('chatLog'); return log.scrollHeight - log.scrollTop - log.clientHeight < 80; };
   const scrollChatToEnd = () => { const log = $('chatLog'); log.scrollTop = log.scrollHeight; };
@@ -240,7 +214,10 @@
     if (!t.shown) t.chatEl.innerHTML = '';
     const fresh = messages.slice(Math.max(0, t.shown - start));
     if (start > t.shown || !fresh.length) return;
-    t.chatEl.insertAdjacentHTML('beforeend', fresh.map(bubbleHtml).join(''));
+    const holder = document.createElement('div');
+    holder.innerHTML = fresh.map((m) => ChatView.bubbleHtml(m, t.asks.has(m.toolUseId))).join('');
+    ChatView.mountPreviews(holder);
+    t.chatEl.append(...holder.childNodes);
     t.shown = start + messages.length;
     if (id === active && follow) scrollChatToEnd();
   }
@@ -256,6 +233,11 @@
         + '<button class="linkish" data-terminal="1">Open terminal</button>';
       return;
     }
+    if (t && t.asks.size) {
+      $('chatStatus').hidden = false;
+      $('chatStatus').innerHTML = '<span class="waiting">Claude is waiting for your answer above.</span>';
+      return;
+    }
     const busy = !!t && BUSY.has(t.state);
     $('chatStatus').hidden = !busy;
     $('chatStatus').innerHTML = busy ? `<span class="dots"><i></i><i></i><i></i></span>${esc(t.status || 'Thinking…')}` : '';
@@ -267,6 +249,7 @@
     const t = tabs.get(active);
     if (!t || !text) return;
     // Enter would land in the open approval dialog and pick its default answer.
+    if (t.asks.size) { say('Answer the question above first', 3000, true); return; }
     if (isWaiting(t)) { renderChatStatus(); say('Answer Claude in the terminal first', 3000, true); return; }
     api.sendChat(active, text);
     chatBox.value = '';
@@ -287,6 +270,67 @@
     say('Image added to your next message', 3000);
   };
   $('chatGo').onclick = sendChat;
+
+  // ---- question cards ----------------------------------------------------------
+  // Picking an option only marks it. The answer goes to Claude when you press Send answer.
+  function refreshCard(card) {
+    const ready = [...card.querySelectorAll('.q-block')].every((block) => {
+      if (!block.querySelector('.q-opt.picked')) return false;
+      return !block.querySelector('.q-other.picked') || block.querySelector('.q-own').value.trim() !== '';
+    });
+    card.querySelector('.q-send').disabled = !ready || !card.classList.contains('live');
+  }
+  function showPreview(block, opt, clear) {
+    const pane = block.querySelector('.q-preview');
+    const text = opt ? opt.dataset.preview : '';
+    if (!text) { if (clear) pane.hidden = true; return; }
+    pane.hidden = false;
+    if (pane.dataset.option === opt.dataset.o) return; // already showing this option
+    pane.dataset.option = opt.dataset.o;
+    pane.innerHTML = ChatView.previewHtml(text);
+    ChatView.mountPreviews(pane);
+  }
+  function pickOption(card, opt) {
+    const block = opt.closest('.q-block');
+    if (block.dataset.multi === '1') opt.classList.toggle('picked');
+    else {
+      block.querySelectorAll('.q-opt.picked').forEach((o) => o.classList.remove('picked'));
+      opt.classList.add('picked');
+    }
+    const own = block.querySelector('.q-own');
+    own.hidden = !block.querySelector('.q-other.picked');
+    if (!own.hidden) own.focus();
+    showPreview(block, opt, true);
+    refreshCard(card);
+  }
+  async function sendAnswer(card) {
+    const tabId = card.closest('.chat-tab').dataset.tab;
+    const answers = [...card.querySelectorAll('.q-block')].map((block) => ({
+      picks: [...block.querySelectorAll('.q-opt.picked')].map((o) => Number(o.dataset.o)),
+      text: block.querySelector('.q-other.picked') ? block.querySelector('.q-own').value.trim() : null,
+    }));
+    const state = card.querySelector('.q-state');
+    card.querySelector('.q-send').disabled = true;
+    state.textContent = 'Sending…';
+    const r = await api.answerQuestion(tabId, card.dataset.ask, answers);
+    if (r.ok) { state.textContent = 'Sent to Claude'; return; }
+    state.textContent = clip(r.error || "That didn't send", 80);
+    refreshCard(card);
+  }
+  $('chatLog').addEventListener('click', (e) => {
+    const card = e.target.closest('.q-card');
+    if (!card || !card.classList.contains('live')) return;
+    const opt = e.target.closest('.q-opt');
+    if (opt) pickOption(card, opt);
+    if (e.target.closest('.q-send') && !e.target.closest('.q-send').disabled) sendAnswer(card);
+  });
+  $('chatLog').addEventListener('mouseover', (e) => {
+    const opt = e.target.closest('.q-card.live .q-opt');
+    if (opt) showPreview(opt.closest('.q-block'), opt, false);
+  });
+  $('chatLog').addEventListener('input', (e) => {
+    if (e.target.classList.contains('q-own')) refreshCard(e.target.closest('.q-card'));
+  });
   // Going back to chat by hand means you've dealt with the terminal. It also gets you out after denying an
   // approval, which fires no hook to say it's over.
   $('viewToggle').onclick = () => {
@@ -384,22 +428,6 @@
     return a ? a.name : key ? key.replace(/[-_]/g, ' ') : 'a helper';
   };
 
-  function describeTool(tool, input, t) {
-    input = input || {};
-    if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return `Editing ${base(input.file_path || input.notebook_path)}`;
-    if (tool === 'Read') return `Reading ${base(input.file_path)}`;
-    if (tool === 'Bash' || tool === 'PowerShell') return `Running: ${clip(input.description || input.command || '', 40)}`;
-    if (tool === 'Grep' || tool === 'Glob') return `Searching for ${clip(input.pattern || '', 30)}`;
-    if (tool === 'WebFetch' || tool === 'WebSearch') return 'Browsing the web';
-    if (tool === 'Task' || tool === 'Agent') return `Sending ${helperName(t, input.subagent_type)}: ${clip(input.description || '', 34)}`;
-    if (tool === 'TodoWrite' || /update_plan/.test(tool)) return 'Planning';
-    if (tool === 'Skill') return `Using the ${input.skill || ''} skill`;
-    if (tool === 'AskUserQuestion') return 'Got a question for you';
-    if (/home-assistant/.test(tool)) return 'Talking to Home Assistant';
-    if (/Browser|chrome/.test(tool)) return 'Using the browser';
-    return clip(tool.replace(/^mcp__[^_]+__/, ''), 32);
-  }
-
   // Helpers at work: counted per agent while running, shown on the tab and the terminal header.
   function renderHelperBadges() {
     const t = tabs.get(active);
@@ -425,13 +453,15 @@
         if (ev.tool === 'AskUserQuestion') { setState(ev.tab, 'needs', 'Got a question for you!'); break; }
         if (ev.tool === 'SubagentHandback' || ev.tool === 'SendFeedback') break; // internal helper plumbing
         if ((ev.tool === 'Agent' || ev.tool === 'Task') && ev.input) helperBusy(t, ev.input.subagent_type || 'general', +1);
-        const what = describeTool(ev.tool, ev.input, t);
+        const what = ev.label || ev.tool;
         setState(ev.tab, 'coding', ev.agentType ? `${helperName(t, ev.agentType)}: ${what}` : what, 0);
         t.toolTimer = setTimeout(() => { if (t.state === 'coding') { t.state = 'focused'; citronMood(); } }, 9000);
         break;
       }
       case 'PostToolUse': if (t.state !== 'focused' || !Object.keys(t.busy).length) setState(ev.tab, 'thinking', ''); break;
-      case 'PermissionRequest': setState(ev.tab, 'needs', `Need you! Allow ${ev.tool || 'this'}?`); break;
+      case 'PermissionRequest':
+        setState(ev.tab, 'needs', ev.tool === 'AskUserQuestion' ? 'Got a question for you!' : `Need you! Allow ${ev.tool || 'this'}?`);
+        break;
       case 'Notification':
         if (ev.kind === 'idle_prompt') break;
         setState(ev.tab, 'needs', clip(ev.message || 'Need you!', 60));
@@ -460,6 +490,14 @@
   function openTerminalWhenNeeded(ev, t) {
     if (ev.event === 'SessionStart') { t.started = true; backToChat(ev.tab); return; }
     if (ev.event === 'PreToolUse' && ev.toolUseId) t.running.set(ev.toolUseId, `${ev.tool} ${JSON.stringify(ev.input)}`);
+    // A question with its questions is answered on its card in the chat, so the terminal stays out of the way.
+    if (ev.event === 'PreToolUse' && ev.tool === 'AskUserQuestion' && ev.toolUseId && ev.input && Array.isArray(ev.input.questions)) {
+      openAsk(t, ev.toolUseId);
+      if (ev.tab === active) renderChatStatus();
+      return;
+    }
+    // Claude Code also sends the question as a PermissionRequest. Its card already covers it.
+    if (ev.event === 'PermissionRequest' && ev.tool === 'AskUserQuestion' && t.asks.size) return;
     const toolAsks = ev.event === 'PermissionRequest' || (ev.event === 'PreToolUse' && ev.tool === 'AskUserQuestion');
     // permission_prompt repeats a PermissionRequest and can arrive after it was answered.
     const otherAsks = ev.event === 'Notification' && ev.kind !== 'idle_prompt' && ev.kind !== 'permission_prompt';
@@ -474,9 +512,13 @@
       t.waiting.delete(ev.toolUseId);
       t.waiting.delete(ev.tool); // when the request couldn't be matched to a call
       t.waitingOther = false;
+      if (t.asks.has(ev.toolUseId)) endAsk(t, ev.toolUseId, 'Answered');
     }
     // A denied tool has no PostToolUse, so a finished or new turn clears everything.
-    if (ev.event === 'Stop' || ev.event === 'UserPromptSubmit') { t.waiting.clear(); t.running.clear(); t.waitingOther = false; }
+    if (ev.event === 'Stop' || ev.event === 'UserPromptSubmit') {
+      t.waiting.clear(); t.running.clear(); t.waitingOther = false;
+      for (const askId of [...t.asks]) endAsk(t, askId, 'Closed');
+    }
     if (!isWaiting(t)) backToChat(ev.tab);
     if (ev.tab === active) renderChatStatus();
   }
@@ -595,7 +637,7 @@
     $('helpers').innerHTML = config.agents.length
       ? '<span class="label">Helpers</span>' + config.agents.map((a) => {
         const on = pickedAgents.has(a.id) || fromTemplates.has(a.id);
-        return `<button class="hchip ${on ? 'on' : ''}" data-agent="${a.id}" title="${esc(a.role)}">${esc(a.name)} <small>${esc(MODEL_NAMES[a.model] === 'Same as main' ? '' : MODEL_NAMES[a.model] || '')}</small></button>`;
+        return `<button class="hchip ${on ? 'on' : ''}" data-agent="${a.id}" title="${esc(a.role)}">${esc(a.icon)} ${esc(a.name)} <small>${esc(MODEL_NAMES[a.model] === 'Same as main' ? '' : MODEL_NAMES[a.model] || '')}</small></button>`;
       }).join('') + '<button class="linkish" data-manage="1">Manage</button>'
       : '<button class="linkish" data-manage="1">＋ Add helper agents (each with its own role, model and effort)</button>';
   }
@@ -641,7 +683,7 @@
   // ---- agents page -----------------------------------------------------------
   function renderAgents() {
     $('agentList').innerHTML = config.agents.map((a) => `<div class="arow"><span class="meta">`
-      + `<span class="t">${esc(a.name)}</span><span class="s">${esc(a.role)}</span>`
+      + `<span class="t">${esc(a.icon)} ${esc(a.name)}</span><span class="s">${esc(a.role)}</span>`
       + `<span class="badges"><span class="badge">${esc(MODEL_NAMES[a.model] || a.model)}</span><span class="badge">Effort: ${esc(EFFORT_NAMES[a.effort] || a.effort)}</span></span></span>`
       + `<button data-edit-agent="${a.id}">Edit</button></div>`).join('')
       || `<div class="arow"><span class="meta"><span class="t">No helpers yet</span><span class="s">Start with a Researcher (Haiku, low effort), a Coder (same model as main, high effort) and a Reviewer (Sonnet, medium), then change them as you like.</span></span><button id="starterBtn">Add starter team</button></div>`;
@@ -729,73 +771,111 @@
   $('modePick').onchange = async (e) => { config = await api.setConfig({ mode: e.target.value }); say('New sessions use that mode', 3000); };
 
   // ---- token meter ---------------------------------------------------------
-  const budget = () => config.dailyBudget || usage.avg14active || 0;
-  const warned = { day: null, 80: false, 100: false };
+  // Two bars: the 5-hour and weekly limits as Claude Code reports them. The percent is Claude's own count;
+  // the token totals come from transcripts and do not add up to it (claude.ai and other PCs count too).
+  const METERS = { fiveHour: 'meter5h', week: 'meterWeek' };
+  const WINDOW_NAMES = { fiveHour: '5-hour', week: 'Weekly' };
+  let limits = boot.limits;
+  let openKind = null;
+  let meterReady = false;
+  const warned = new Set(); // `${kind}:${resetsAt}:${level}`: each level toasts once per window
 
-  function renderMeter() {
-    const b = budget();
-    const today = usage.today.main;
-    const pct = b ? today / b : 0;
-    $('meterToday').textContent = fmt(today);
-    $('meterOf').textContent = b ? `of ${fmt(b)} · ${Math.round(pct * 100)}%` : 'no budget yet';
-    const fill = $('meterFill');
-    fill.style.width = `${Math.min(100, pct * 100)}%`;
-    fill.className = 'meter-fill' + (pct >= 1 ? ' red' : pct >= 0.8 ? ' amber' : '');
-    const w = usage.window;
-    $('meterWindow').textContent = w ? `5h window: ${fmt(w.main)} · resets in ${until(w.end)}` : '5h window not started';
+  const isCurrent = (lim) => Boolean(lim && lim.resetsAt > Date.now());
+  const limitOf = (kind) => (limits && limits[kind]) || null;
 
-    const day = new Date().toDateString();
-    if (warned.day !== day) Object.assign(warned, { day, 80: pct >= 0.8, 100: pct >= 1 }); // don't nag at startup
-    if (b && pct >= 1 && !warned[100]) { warned[100] = true; say(`Over today's budget (${fmt(b)})!`, 8000, true); }
-    else if (b && pct >= 0.8 && !warned[80]) { warned[80] = true; say("80% of today's budget used", 7000); }
-    if (!$('meterPop').hidden) renderPop();
+  function renderBar(kind) {
+    const btn = $(METERS[kind]);
+    const lim = limitOf(kind);
+    const current = isCurrent(lim);
+    const pct = current ? lim.percent : null;
+    btn.querySelector('.meter-num').textContent = pct === null ? '–' : `${Math.round(pct)}%`;
+    btn.querySelector('.meter-of').textContent = !lim ? '' : current ? `resets in ${until(lim.resetsAt)}` : 'reset';
+    btn.title = !lim ? "Shows after Claude's first reply" : current ? `${WINDOW_NAMES[kind]} limit` : 'Updates after your next reply';
+    const fill = btn.querySelector('.meter-fill');
+    fill.style.width = `${Math.min(100, pct || 0)}%`;
+    fill.className = 'meter-fill' + (pct >= 100 ? ' red' : pct >= 80 ? ' amber' : '');
   }
+
+  // One toast for the highest level reached in a window. The first render after start stays quiet.
+  function warnLevel(kind, lim) {
+    if (!isCurrent(lim)) return;
+    const level = [100, 80].find((l) => lim.percent >= l);
+    if (!level) return;
+    const key = `${kind}:${lim.resetsAt}:${level}`;
+    if (warned.has(key)) return;
+    warned.add(key);
+    if (meterReady) say(`${level === 100 ? 'Reached' : '80% of'} your ${WINDOW_NAMES[kind].toLowerCase()} limit`, 7000, level === 100);
+  }
+
+  function renderMeters() {
+    const hidden = config.setup === 'local';
+    for (const kind of Object.keys(METERS)) {
+      const btn = $(METERS[kind]);
+      btn.hidden = hidden;
+      if (hidden) continue;
+      renderBar(kind);
+      warnLevel(kind, limitOf(kind));
+    }
+    meterReady = true;
+    if (openKind) renderPop(openKind);
+  }
+
   const until = (t) => {
     const m = Math.max(0, Math.round((t - Date.now()) / 60000));
     return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
   };
+  const resetDay = (t) => new Date(t).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
-  function renderPop() {
-    const b = budget(), u = usage, w = u.window;
-    const days = [...u.history, { day: 'today', main: u.today.main }];
-    const max = Math.max(b, ...days.map((d) => d.main), 1);
-    const sessionTokens = (() => { const t = tabs.get(active); return t && t.sessionId ? u.sessions[t.sessionId] || 0 : null; })();
-    const projColour = b && u.projection > b ? 'var(--red)' : 'var(--text)';
+  function renderPop(kind) {
+    const lim = limitOf(kind);
+    const current = isCurrent(lim);
+    const t = usage[kind] || null;
+    const dash = (v) => (t ? fmt(v) : '–');
+    // Claude Code writes "<synthetic>" for its own placeholder replies, which use no tokens.
+    const models = t ? Object.entries(t.byModel).filter(([name, n]) => n > 0 && name !== '<synthetic>').sort((a, b) => b[1] - a[1]) : [];
+    const tab = tabs.get(active);
+    const sessionTokens = tab && tab.sessionId ? usage.sessions[tab.sessionId] || 0 : null;
+    let status = "Shows after Claude's first reply.";
+    if (current) status = kind === 'fiveHour' ? `resets in ${until(lim.resetsAt)}` : `resets ${resetDay(lim.resetsAt)}`;
+    else if (lim) status = 'That window has reset. The percent updates after your next reply.';
     $('meterPop').innerHTML = `
-      <div class="pop-big">${fmt(u.today.main)}<small>${b ? `of ${fmt(b)} today` : 'today'}</small></div>
-      <div class="pop-sub">+ ${fmt(u.today.cacheRead)} cache reads (cheap, not counted) · in ${fmt(u.today.input)} · out ${fmt(u.today.output)} · cache writes ${fmt(u.today.cacheWrite)}</div>
-      <div class="pop-sub">Local model (GPT-OSS 20B, this PC): ${fmt(u.localToday.main)} today · 5h window ${u.localWindow ? `${fmt(u.localWindow.main)}, resets in ${until(u.localWindow.end)}` : 'not started'}. Kept out of the numbers above.</div>
+      <div class="pop-big">${current ? `${Math.round(lim.percent)}%` : '–'}<small>${WINDOW_NAMES[kind]} limit</small></div>
+      <div class="pop-sub">${status}</div>
       <div class="pop-grid">
-        <div class="pop-stat"><b>${w ? until(w.end) : '–'}</b><span>${w ? `until the 5h window resets · ${fmt(w.main)} used` : '5h window not started'}</span></div>
-        <div class="pop-stat"><b style="color:${projColour}">${fmt(u.projection)}</b><span>today at this pace</span></div>
-        <div class="pop-stat"><b>${fmt(u.avg7)}</b><span>7-day average</span></div>
+        <div class="pop-stat"><b>${dash(t && t.main)}</b><span>tokens this window</span></div>
+        <div class="pop-stat"><b>${t ? t.sessions : '–'}</b><span>sessions this window</span></div>
         <div class="pop-stat"><b>${sessionTokens === null ? '–' : fmt(sessionTokens)}</b><span>this session</span></div>
+        <div class="pop-stat"><b>${dash(t && t.cacheRead)}</b><span>cache reads (not counted)</span></div>
       </div>
-      <div class="bars">${days.map((d) => `<div class="b ${d.day === 'today' ? 'today' : ''} ${b && d.main > b ? 'over' : ''}" style="height:${(d.main / max) * 100}%" title="${d.day}: ${fmt(d.main)}"></div>`).join('')}
-        ${b ? `<div class="budget-line" style="bottom:${(b / max) * 100}%"></div>` : ''}</div>
-      <div class="bar-labels">${days.map((d) => `<span>${d.day === 'today' ? 'today' : new Date(d.day + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' })}</span>`).join('')}</div>
-      <div class="pop-budget"><input id="budgetInput" type="text" placeholder="Daily budget, e.g. 2M or 1500k" value="${config.dailyBudget ? fmt(config.dailyBudget) : ''}"><button class="btn primary" id="budgetSave">Save</button></div>
-      <div class="pop-note">${config.dailyBudget ? 'Clear the box to go back to your 14-day average.' : `Using your 14-day average (${fmt(u.avg14active)}) until you set one.`} Counts input + output + cache writes across all Claude Code sessions (helpers included), desktop app too. Local-model calls are not counted.</div>`;
-    $('budgetSave').onclick = saveBudget;
-    $('budgetInput').onkeydown = (e) => { if (e.key === 'Enter') saveBudget(); };
+      ${t ? `<div class="pop-sub">In ${fmt(t.input)} · out ${fmt(t.output)} · cache writes ${fmt(t.cacheWrite)}</div>` : ''}
+      ${models.map(([name, n]) => `<div class="pop-row"><span>${esc(name)}</span><b>${fmt(n)}</b></div>`).join('')}
+      ${kind === 'fiveHour' && usage.localWindow ? `<div class="pop-sub">Local model (GPT-OSS 20B, this PC): ${fmt(usage.localWindow.main)} in this window. Kept out of the numbers above.</div>` : ''}
+      <div class="pop-note">The percent is Claude's own count and also includes claude.ai chat and other computers, so these token totals will not add up to it. Input + output + cache writes across Claude Code sessions here; helpers included.</div>`;
   }
-  async function saveBudget() {
-    const raw = $('budgetInput').value.trim().toLowerCase();
-    let n = null;
-    if (raw) {
-      const m = raw.match(/^([\d.]+)\s*([km]?)$/);
-      if (!m) { $('budgetInput').style.borderColor = 'var(--red)'; return; }
-      n = Math.round(parseFloat(m[1]) * (m[2] === 'm' ? 1e6 : m[2] === 'k' ? 1e3 : 1));
-    }
-    config = await api.setConfig({ dailyBudget: n });
-    renderMeter(); renderPop();
-    say(n ? `Budget set: ${fmt(n)} a day` : 'Back to your 14-day average', 3000);
+
+  function togglePop(kind, button) {
+    const pop = $('meterPop');
+    const closing = openKind === kind && !pop.hidden;
+    openKind = closing ? null : kind;
+    pop.hidden = closing;
+    if (closing) return;
+    const rect = button.getBoundingClientRect();
+    pop.style.left = `${Math.max(8, rect.right - 340)}px`;
+    renderPop(kind);
   }
-  $('meterBtn').onclick = (e) => { e.stopPropagation(); $('meterPop').hidden = !$('meterPop').hidden; if (!$('meterPop').hidden) renderPop(); };
-  document.addEventListener('click', (e) => { if (!e.target.closest('#meterPop') && !e.target.closest('#meterBtn')) $('meterPop').hidden = true; });
-  api.onUsage((u) => { usage = u; renderMeter(); });
-  setInterval(renderMeter, 30000);
-  renderMeter();
+  for (const kind of Object.keys(METERS)) {
+    const button = $(METERS[kind]);
+    button.onclick = (e) => { e.stopPropagation(); togglePop(kind, button); };
+  }
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#meterPop') || e.target.closest('.meter')) return;
+    $('meterPop').hidden = true;
+    openKind = null;
+  });
+  api.onUsage((u) => { usage = u; renderMeters(); });
+  api.onLimits((l) => { limits = l; renderMeters(); });
+  setInterval(renderMeters, 30000); // reset times count down and windows roll over without an event
+  renderMeters();
 
   // ---- modals --------------------------------------------------------------
   function openModal(html) { $('modal').innerHTML = html; $('modalBack').hidden = false; }
@@ -809,8 +889,8 @@
     openModal(`
       <h2>${a ? 'Edit agent' : 'New agent'}</h2>
       <p>A helper your main Claude can hand work to. It runs with its own model and effort.</p>
-      <label class="f">Name</label>
-      <input type="text" id="aName" placeholder="e.g. Tester" value="${esc(a ? a.name : '')}">
+      <label class="f">Icon and name (the icon shows on its messages in the chat)</label>
+      <div class="two"><input type="text" class="icon" id="aIcon" value="${esc(a ? a.icon : '')}"><input type="text" id="aName" placeholder="e.g. Tester" value="${esc(a ? a.name : '')}"></div>
       <label class="f">Role: what it does and when to use it</label>
       <textarea id="aRole" style="min-height:70px" placeholder="e.g. Writes and runs tests for new code, and reports failures.">${esc(a ? a.role : '')}</textarea>
       <div class="two" style="margin-top:4px">
@@ -832,7 +912,7 @@
       const name = $('aName').value.trim(), role = $('aRole').value.trim();
       if (!name) { $('aErr').textContent = 'Give it a name.'; return; }
       if (!role) { $('aErr').textContent = 'Say what it does, so Claude knows when to use it.'; return; }
-      config.agents = await api.saveAgent({ id: a && a.id, name, role, model: $('aModel').value, effort: $('aEffort').value, prompt: $('aPrompt').value });
+      config.agents = await api.saveAgent({ id: a && a.id, name, icon: $('aIcon').value.trim(), role, model: $('aModel').value, effort: $('aEffort').value, prompt: $('aPrompt').value });
       if (!a) pickedAgents.add(config.agents[config.agents.length - 1].id);
       closeModal(); renderAgents(); renderHome(); say(`${name} joined the team`, 3000);
     };

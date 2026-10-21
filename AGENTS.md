@@ -23,8 +23,9 @@ project templates. How it works and the file map: README.md.
   `ANTHROPIC_BASE_URL` points at. Only sessions with a local helper get that variable; keep it that way, since the
   router sees every call. The name `lemon-gpt-oss-20b` is in three places (`src/router.js`, the Modelfile, and
   the helper list in `src/renderer/app.js`): change them together.
-- The meter's main number is input + output + cache writes; cache reads are shown but not counted. Messages are
-  deduped by message id + request id (Claude Code writes one line per content block).
+- The bars' percent is Claude's own count. Token totals in their popups are input + output + cache writes from
+  this PC's transcripts; cache reads are shown but not counted. Messages are deduped by message id + request id
+  (Claude Code writes one line per content block).
 - Citron is drawn in code (`src/renderer/citron.js`), not image files. `npm run icon` redraws the app icon from it.
 - Never commit `node_modules/`; `build/` output is fine to rebuild.
 - It's meant to be shared: nothing personal in the code. Only "Blank" is built in; every other template is one
@@ -66,9 +67,18 @@ project templates. How it works and the file map: README.md.
   `user`/`assistant` lines with real text. Add a test in `test/chat.test.js` for any new line type you hide.
 - On `--resume` the whole history is read before the page has made the tab, so main keeps each tab's messages
   and the page fetches them (`chat:history`). Attach the feed's listener before `start()`.
-- Approvals, questions, sign-in and the trust prompt can only be answered in the terminal, so the page switches
-  to it for those and back after. Sign-in and trust fire no hooks: it opens the terminal if `SessionStart`
-  hasn't come within 6 s.
+- Approvals, sign-in and the trust prompt can only be answered in the terminal, so the page switches to it for
+  those and back after. Sign-in and trust fire no hooks: it opens the terminal if `SessionStart` hasn't come
+  within 6 s.
+- Questions (AskUserQuestion) are answered on a chat card, which types keys into the dialog (`src/questions.js`).
+  The key rules came from driving claude.exe 2.1.306 in a PTY; if the dialog changes, probe it again the same way
+  before touching them. Claude Code also sends the question as a `PermissionRequest`: don't open the terminal for it.
+- A question whose options have previews has no "Type something" row in the dialog, so the card has none either.
+- The trust prompt's default is now "No, exit": a script that answers it must press Down before Enter.
+- The 5h/weekly bars come from a `statusLine` command in the `--settings` file (`src/statusline.js`), which posts
+  `rate_limits` to the hook server's `/limits`. Only Pro/Max plans send them, and only after the first reply.
+- Local helpers are told to run one at a time (`helperHint`): Ollama has one slot and one prompt cache, so
+  parallel local helpers queue and re-read their whole prompt on every switch.
 - Open approvals are tracked by `tool_use_id` (PreToolUse/PostToolUse have it). `PermissionRequest` has none,
   so it's matched to the running call by tool + input. Denying (Esc) fires no hook at all: Esc in the
   terminal and the Chat button count as the answer. Tested with Ask first mode and Haiku.

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Holds one HTML preview from a question card. The preview runs in a second, sandboxed frame inside this one.
+     This page's own policy lets that frame's scripts run and blocks network requests. The app's policy doesn't
+     apply here, and neither frame can reach the app. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; font-src data: https:; frame-src 'self'">
+<style>
+  html, body, iframe { margin: 0; width: 100%; height: 100%; border: 0; }
+  html { background: #fff; color-scheme: light; }
+</style>
+</head>
+<body>
+<iframe id="doc" sandbox="allow-scripts" title="Preview"></iframe>
+<script>
+  // The question card posts the preview's HTML here once this frame has loaded.
+  window.addEventListener('message', (e) => {
+    if (e.source === window.parent) document.getElementById('doc').srcdoc = String(e.data);
+  });
+</script>
+</body>
+</html>
