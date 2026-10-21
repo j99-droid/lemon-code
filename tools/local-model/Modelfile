@@ -1,0 +1,6 @@
+# The local model helpers use (src/router.js LOCAL_MODEL). Make it once:
+#   ollama pull qwen3-coder:30b
+#   ollama create lemon-qwen3-coder -f tools/local-model/Modelfile
+# Ollama's default context is too small for Claude Code's prompts, so the context size is set here.
+FROM qwen3-coder:30b
+PARAMETER num_ctx 32768
