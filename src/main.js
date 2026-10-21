@@ -10,7 +10,7 @@ const { Usage } = require('./usage');
 const { ChatFeed } = require('./chat');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 const { MODELS, EFFORTS, DEFAULT_MODEL, DEFAULT_EFFORT } = require('./power');
-const { startRouter, LOCAL_MODEL, OLLAMA } = require('./router');
+const { startRouter, LOCAL_MODEL, LOCAL_CONTEXT_TOKENS, OLLAMA } = require('./router');
 const setup = require('./setup');
 
 const ROOT = path.join(__dirname, '..');
@@ -172,7 +172,9 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   const usesLocal = helpers.some((a) => a.model === LOCAL_MODEL);
   let extraEnv = {};
   if (localOnly) extraEnv = setup.localOnlyEnv(localRouterPort);
-  else if (usesLocal) extraEnv = { ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}` };
+  else if (usesLocal) {
+    extraEnv = { ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}`, CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(LOCAL_CONTEXT_TOKENS) };
+  }
   const tab = spawnTerminal({ title, cwd, file: exe, args, extraEnv });
   const t = tabs.get(tab.id);
   t.agentIds = helpers.map((a) => a.id);
@@ -188,7 +190,7 @@ function agentsJson(helpers, localOnly) {
     if (localOnly) def.model = LOCAL_MODEL; // Claude model names would have no account to run on
     else if (a.model && a.model !== 'inherit') def.model = a.model;
     if (a.effort && a.effort !== 'inherit') def.effort = a.effort;
-    // Every tool definition is sent with each call. A local model has a 32K context, so it gets only what coding needs.
+    // Every tool definition is sent with each call. A local model has a 64K context, so it gets only what coding needs.
     if (a.model === LOCAL_MODEL) def.tools = LOCAL_HELPER_TOOLS;
     out[a.key] = def;
   }

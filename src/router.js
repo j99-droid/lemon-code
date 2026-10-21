@@ -8,6 +8,8 @@ const https = require('https');
 // The name helpers use, and the name `ollama create` gives the model (tools/local-model/Modelfile). The Modelfile
 // raises the context window, because Claude Code's prompts don't fit Ollama's default.
 const LOCAL_MODEL = 'lemon-gpt-oss-20b';
+// Claude Code doesn't know LOCAL_MODEL, so it assumes a 200k window. This must match num_ctx in the Modelfile.
+const LOCAL_CONTEXT_TOKENS = 65536;
 const OLLAMA = { protocol: 'http:', host: '127.0.0.1', port: 11434 };
 const ANTHROPIC = { protocol: 'https:', host: 'api.anthropic.com', port: 443 };
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -77,4 +79,4 @@ function startRouter(targets = { local: OLLAMA, remote: ANTHROPIC }) {
   });
 }
 
-module.exports = { startRouter, LOCAL_MODEL, OLLAMA, ANTHROPIC };
+module.exports = { startRouter, LOCAL_MODEL, LOCAL_CONTEXT_TOKENS, OLLAMA, ANTHROPIC };

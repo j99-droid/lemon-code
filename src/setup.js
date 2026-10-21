@@ -5,7 +5,7 @@ const path = require('path');
 const os = require('os');
 const http = require('http');
 const { execFileSync } = require('child_process');
-const { OLLAMA, LOCAL_MODEL } = require('./router');
+const { OLLAMA, LOCAL_MODEL, LOCAL_CONTEXT_TOKENS } = require('./router');
 
 // The base model the Modelfile builds from (its FROM line). Keep the two in step.
 const LOCAL_BASE_MODEL = 'gpt-oss:20b';
@@ -77,6 +77,7 @@ function localOnlyEnv(routerPort) {
     ANTHROPIC_DEFAULT_SONNET_MODEL: LOCAL_MODEL,
     ANTHROPIC_DEFAULT_OPUS_MODEL: LOCAL_MODEL,
     ANTHROPIC_SMALL_FAST_MODEL: LOCAL_MODEL,
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(LOCAL_CONTEXT_TOKENS),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   };
 }
