@@ -114,11 +114,20 @@
         <div><strong id="termTitle"></strong><span id="termCwd"></span></div>
         <div class="term-actions">
           <span class="helper-badges" id="termHelpers"></span>
+          <button id="viewToggle" title="Switch between the chat and Claude's terminal">Terminal</button>
           <button id="openFolderBtn" title="Open folder">Open folder</button>
           <button id="closeTabBtn" title="Stop this session">Stop</button>
         </div>
       </div>
       <div class="term-wrap" id="termWrap"></div>
+      <div class="chat" id="chat" hidden>
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-status" id="chatStatus"></div>
+        <div class="chat-ask">
+          <textarea id="chatBox" rows="1" placeholder="Message Claude. Enter sends, Shift+Enter for a new line, Esc stops Claude"></textarea>
+          <button class="ask-go" id="chatGo">Send ↵</button>
+        </div>
+      </div>
     </section>
   </main>
 

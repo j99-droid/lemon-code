@@ -1,4 +1,4 @@
-// LemonCode renderer: tabs, pages (home, agents, recent, archived), terminals, token meter, Citron, modals.
+// LemonCode renderer: tabs, pages (home, agents, recent, archived), terminals, chat view, token meter, Citron, modals.
 (async function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -94,6 +94,10 @@
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       if (e.key === 'Enter' && e.shiftKey) { api.write(id, '\x1b\r'); return false; } // newline in Claude's prompt
+      if (e.key === 'Escape' && t.autoTerminal) { // denying an approval fires no hook, so treat Esc as the answer
+        t.waiting.clear(); t.waitingOther = false;
+        setTimeout(() => backToChat(id), 300);
+      }
       if (e.ctrlKey && e.key === 'c' && term.hasSelection()) {
         navigator.clipboard.writeText(term.getSelection()); term.clearSelection(); return false;
       }
@@ -106,27 +110,58 @@
       return true;
     });
     new ResizeObserver(() => { if (el.offsetParent) { try { fit.fit(); } catch { /* hidden */ } } }).observe(el);
-    tabs.set(id, { term, fit, el, title, cwd, state: 'idle', sessionId: sessionId || null, toolTimer: null,
-      agents: agents || [], busy: {} });
+    const chatEl = document.createElement('div');
+    chatEl.className = 'chat-tab';
+    chatEl.innerHTML = '<div class="chat-empty">Starting Claude…</div>';
+    $('chatLog').appendChild(chatEl);
+    const t = { term, fit, el, chatEl, title, cwd, state: 'idle', sessionId: sessionId || null, toolTimer: null,
+      agents: agents || [], busy: {}, mode: 'chat', autoTerminal: false, started: false, status: '', shown: 0,
+      waiting: new Set(), waitingOther: false, running: new Map() };
+    tabs.set(id, t);
+    // Sign-in and "trust this folder?" happen in the terminal before any hook fires, so if Claude hasn't
+    // started after a few seconds it's probably waiting there.
+    setTimeout(() => { if (!t.started && tabs.has(id)) setMode(id, 'terminal', true); }, START_WAIT_MS);
     setState(id, 'idle', agents && agents.length ? `Starting Claude + ${agents.length} helper${agents.length > 1 ? 's' : ''}…` : 'Starting Claude…');
     show(id);
+    loadChatHistory(id);
   }
+
+  // Each session shows as chat (what you and Claude said) or as Claude's real terminal. The terminal
+  // opens by itself when Claude needs an answer there (approvals, questions, sign-in) and closes again after.
+  const START_WAIT_MS = 6000;
+  function setMode(id, mode, auto = false) {
+    const t = tabs.get(id);
+    if (!t) return;
+    t.mode = mode;
+    t.autoTerminal = auto && mode === 'terminal';
+    if (id === active) show(id);
+  }
+  const backToChat = (id) => { const t = tabs.get(id); if (t && t.autoTerminal) setMode(id, 'chat'); };
 
   // The stage shows one terminal, or a page when no terminal is active.
   let view = 'home';
   const PAGES = { home: 'welcome', agents: 'agentsView', recent: 'recentView', archive: 'archiveView' };
   function show(id) {
     active = id;
-    for (const [tid, t] of tabs) t.el.hidden = tid !== id;
+    for (const [tid, t] of tabs) { t.el.hidden = tid !== id; t.chatEl.hidden = tid !== id; }
     const t = tabs.get(id);
     for (const [v, el] of Object.entries(PAGES)) $(el).hidden = !!t || view !== v;
     $('terminals').hidden = !t;
     $('completeBtn').disabled = !t;
     if (t) {
+      const isChat = t.mode === 'chat';
       $('termTitle').textContent = t.title;
       $('termCwd').textContent = t.cwd;
+      $('termWrap').hidden = isChat;
+      $('chat').hidden = !isChat;
+      $('viewToggle').textContent = isChat ? 'Terminal' : 'Chat';
       renderHelperBadges();
-      requestAnimationFrame(() => { try { t.fit.fit(); } catch { /* */ } t.term.focus(); });
+      renderChatStatus();
+      requestAnimationFrame(() => {
+        if (isChat) { scrollChatToEnd(); chatBox.focus(); return; }
+        try { t.fit.fit(); } catch { /* */ }
+        t.term.focus();
+      });
     }
     renderTabs();
     citronMood();
@@ -138,11 +173,130 @@
   }
   const goHome = () => goPage('home');
 
+  // ---- chat view -------------------------------------------------------------
+  const chatBox = $('chatBox');
+  const BUSY = new Set(['thinking', 'typing', 'coding', 'focused']);
+
+  // Enough Markdown for Claude's replies: code blocks, inline code, bold, headings, lists, tables, links.
+  // Text is escaped before any tags are added, so nothing in a transcript can inject HTML.
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  function markdown(text) {
+    return text.split(/```[^\n]*\n?([\s\S]*?)```/g).map((part, i) => (i % 2
+      ? `<pre><code>${esc(part.replace(/\n$/, ''))}</code></pre>`
+      : markdownBlocks(part))).join('');
+  }
+  function markdownBlocks(text) {
+    const html = [];
+    let open = null; // 'ul', 'ol' or 'table' while inside one
+    const close = () => { if (open) html.push(`</${open}>`); open = null; };
+    const enter = (tag) => { if (open !== tag) { close(); open = tag; html.push(`<${tag}>`); } };
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue; // blank lines between list items shouldn't restart the numbering
+      const item = line.match(/^\s*(?:([-*])|\d+[.)])\s+(.*)/);
+      const heading = line.match(/^#{1,4}\s+(.*)/);
+      if (line.trim().startsWith('|')) {
+        enter('table');
+        if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) continue; // the |---|---| row under the header
+        const cells = line.trim().replace(/^\||\|$/g, '').split('|');
+        html.push(`<tr>${cells.map((c) => `<td>${inline(c.trim())}</td>`).join('')}</tr>`);
+      } else if (item) {
+        enter(item[1] ? 'ul' : 'ol');
+        html.push(`<li>${inline(item[2])}</li>`);
+      } else {
+        close();
+        html.push(heading ? `<h4>${inline(heading[1])}</h4>` : `<p>${inline(line)}</p>`);
+      }
+    }
+    close();
+    return html.join('');
+  }
+
+  const bubbleHtml = (m) => {
+    if (m.role === 'note') return `<div class="msg note">${esc(m.text)}</div>`;
+    if (m.role === 'user') return `<div class="msg user">${esc(m.text)}</div>`;
+    return `<div class="msg assistant${m.ask ? ' question' : ''}">${markdown(m.text)}</div>`;
+  };
+
+  const chatAtEnd = () => { const log = $('chatLog'); return log.scrollHeight - log.scrollTop - log.clientHeight < 80; };
+  const scrollChatToEnd = () => { const log = $('chatLog'); log.scrollTop = log.scrollHeight; };
+
+  // Messages carry their position in the tab's list (start), so a push that overlaps the history fetched
+  // on opening is skipped instead of shown twice. reset = a new transcript (e.g. after /clear).
+  function addChat(id, messages, start, reset) {
+    const t = tabs.get(id);
+    if (!t) return;
+    const follow = id !== active || !t.shown || chatAtEnd(); // don't yank you down while you scroll back
+    if (reset) t.shown = 0;
+    if (!t.shown) t.chatEl.innerHTML = '';
+    const fresh = messages.slice(Math.max(0, t.shown - start));
+    if (start > t.shown || !fresh.length) return;
+    t.chatEl.insertAdjacentHTML('beforeend', fresh.map(bubbleHtml).join(''));
+    t.shown = start + messages.length;
+    if (id === active && follow) scrollChatToEnd();
+  }
+  api.onChat(addChat);
+  const loadChatHistory = (id) => api.chatHistory(id).then((messages) => { if (messages.length) addChat(id, messages, 0, false); });
+
+  const isWaiting = (t) => t.waiting.size > 0 || t.waitingOther;
+  function renderChatStatus() {
+    const t = tabs.get(active);
+    if (t && isWaiting(t)) {
+      $('chatStatus').hidden = false;
+      $('chatStatus').innerHTML = '<span class="waiting">Claude is waiting for you in the terminal.</span>'
+        + '<button class="linkish" data-terminal="1">Open terminal</button>';
+      return;
+    }
+    const busy = !!t && BUSY.has(t.state);
+    $('chatStatus').hidden = !busy;
+    $('chatStatus').innerHTML = busy ? `<span class="dots"><i></i><i></i><i></i></span>${esc(t.status || 'Thinking…')}` : '';
+  }
+  $('chatStatus').onclick = (e) => { if (e.target.closest('[data-terminal]')) setMode(active, 'terminal'); };
+
+  function sendChat() {
+    const text = chatBox.value.trim();
+    const t = tabs.get(active);
+    if (!t || !text) return;
+    // Enter would land in the open approval dialog and pick its default answer.
+    if (isWaiting(t)) { renderChatStatus(); say('Answer Claude in the terminal first', 3000, true); return; }
+    api.sendChat(active, text);
+    chatBox.value = '';
+    fitChatBox();
+  }
+  const fitChatBox = () => { chatBox.style.height = 'auto'; chatBox.style.height = `${chatBox.scrollHeight}px`; };
+  chatBox.oninput = fitChatBox;
+  chatBox.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    if (e.key === 'Escape' && active) api.write(active, '\x1b'); // same as Esc in the terminal: stops Claude
+  };
+  // An image on the clipboard goes to Claude the way the terminal does it: a raw Ctrl+V lets Claude grab it.
+  chatBox.onpaste = (e) => {
+    const hasImage = [...e.clipboardData.items].some((i) => i.type.startsWith('image/'));
+    if (!active || !hasImage || e.clipboardData.getData('text')) return;
+    e.preventDefault();
+    api.write(active, '\x16');
+    say('Image added to your next message', 3000);
+  };
+  $('chatGo').onclick = sendChat;
+  // Going back to chat by hand means you've dealt with the terminal. It also gets you out after denying an
+  // approval, which fires no hook to say it's over.
+  $('viewToggle').onclick = () => {
+    const t = tabs.get(active);
+    if (!t) return;
+    if (t.mode === 'chat') return setMode(active, 'terminal');
+    t.waiting.clear();
+    t.waitingOther = false;
+    setMode(active, 'chat');
+  };
+
   api.onData((id, d) => { const t = tabs.get(id); if (t) t.term.write(d); });
   api.onExit((id) => {
     const t = tabs.get(id);
     if (!t) return;
-    t.term.dispose(); t.el.remove(); tabs.delete(id);
+    t.term.dispose(); t.el.remove(); t.chatEl.remove(); tabs.delete(id);
     if (active === id) { const next = [...tabs.keys()].pop(); next ? show(next) : goHome(); }
     renderTabs();
     refreshSessions();
@@ -178,7 +332,9 @@
     const t = tabs.get(id);
     if (!t) return;
     t.state = state; t.since = Date.now();
+    if (text !== undefined) t.status = text;
     clearTimeout(t.toolTimer);
+    if (id === active) renderChatStatus();
     if (id === active || state === 'needs') {
       const label = state === 'needs' && id !== active ? `${text} (${t.title})` : text;
       if (text !== undefined) say(label, ms ?? (state === 'needs' ? 0 : 4500), state === 'needs');
@@ -283,7 +439,42 @@
         break;
       case 'SessionEnd': setState(ev.tab, 'idle', 'Bye!'); break;
     }
+    openTerminalWhenNeeded(ev, t);
   });
+
+  // Approvals and questions are answered in Claude's terminal, so show it until every open one is answered.
+  // They're tracked by tool call id: a parallel tool or a helper can finish while a prompt is still open.
+  // Other notifications (no tool call) wait for the turn to move on.
+  function openTerminalWhenNeeded(ev, t) {
+    if (ev.event === 'SessionStart') { t.started = true; backToChat(ev.tab); return; }
+    if (ev.event === 'PreToolUse' && ev.toolUseId) t.running.set(ev.toolUseId, `${ev.tool} ${JSON.stringify(ev.input)}`);
+    const toolAsks = ev.event === 'PermissionRequest' || (ev.event === 'PreToolUse' && ev.tool === 'AskUserQuestion');
+    // permission_prompt repeats a PermissionRequest and can arrive after it was answered.
+    const otherAsks = ev.event === 'Notification' && ev.kind !== 'idle_prompt' && ev.kind !== 'permission_prompt';
+    if (toolAsks || otherAsks) {
+      if (toolAsks) t.waiting.add(ev.toolUseId || askedToolId(t, ev) || ev.tool); else t.waitingOther = true;
+      if (t.mode === 'chat') setMode(ev.tab, 'terminal', true);
+      if (ev.tab === active) renderChatStatus();
+      return;
+    }
+    if (ev.event === 'PostToolUse') {
+      t.running.delete(ev.toolUseId);
+      t.waiting.delete(ev.toolUseId);
+      t.waiting.delete(ev.tool); // when the request couldn't be matched to a call
+      t.waitingOther = false;
+    }
+    // A denied tool has no PostToolUse, so a finished or new turn clears everything.
+    if (ev.event === 'Stop' || ev.event === 'UserPromptSubmit') { t.waiting.clear(); t.running.clear(); t.waitingOther = false; }
+    if (!isWaiting(t)) backToChat(ev.tab);
+    if (ev.tab === active) renderChatStatus();
+  }
+  // PermissionRequest has no tool_use_id (seen in testing), but it has the tool and its input: find the
+  // running call with the same ones.
+  function askedToolId(t, ev) {
+    const wanted = `${ev.tool} ${JSON.stringify(ev.input)}`;
+    for (const [id, call] of t.running) if (call === wanted && !t.waiting.has(id)) return id;
+    return null;
+  }
 
   api.onAssistantText((id) => {
     const t = tabs.get(id);
