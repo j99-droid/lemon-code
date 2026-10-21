@@ -616,10 +616,34 @@
   $('closeTabBtn').onclick = () => { if (active) api.kill(active); };
 
   // ---- pickers (main Claude, new sessions) -----------------------------------
-  for (const [id, key, what] of [['modelPick', 'model', 'model'], ['effortPick', 'effort', 'effort'], ['modePick', 'mode', 'mode']]) {
-    $(id).value = config[key] || 'default';
-    $(id).onchange = async (e) => { config = await api.setConfig({ [key]: e.target.value }); say(`New sessions use that ${what}`, 3000); };
+  // Model and effort each have a slider; the arm shows both as one strength. Dragging only previews;
+  // the change is saved when you let go.
+  const modelPick = $('modelPick'), effortPick = $('effortPick');
+  function showPicks() {
+    const modelIndex = Number(modelPick.value), effortIndex = Number(effortPick.value);
+    const strength = (modelIndex / (boot.models.length - 1) + effortIndex / (boot.efforts.length - 1)) / 2;
+    $('powerArm').innerHTML = Arm.svg(Math.round(strength * 5));
+    $('modelName').textContent = MODEL_NAMES[boot.models[modelIndex]];
+    $('effortName').textContent = EFFORT_NAMES[boot.efforts[effortIndex]];
   }
+  modelPick.value = boot.models.indexOf(config.model);
+  effortPick.value = boot.efforts.indexOf(config.effort);
+  showPicks();
+  modelPick.oninput = showPicks;
+  effortPick.oninput = showPicks;
+  modelPick.onchange = async () => {
+    const model = boot.models[Number(modelPick.value)];
+    config = await api.setConfig({ model });
+    say(`New sessions use ${MODEL_NAMES[model]}`, 3000);
+  };
+  effortPick.onchange = async () => {
+    const effort = boot.efforts[Number(effortPick.value)];
+    config = await api.setConfig({ effort });
+    say(`New sessions use ${EFFORT_NAMES[effort]} effort`, 3000);
+  };
+
+  $('modePick').value = config.mode || 'default';
+  $('modePick').onchange = async (e) => { config = await api.setConfig({ mode: e.target.value }); say('New sessions use that mode', 3000); };
 
   // ---- token meter ---------------------------------------------------------
   const budget = () => config.dailyBudget || usage.avg14active || 0;
