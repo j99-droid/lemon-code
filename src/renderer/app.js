@@ -21,7 +21,11 @@
   };
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
-  const MODEL_NAMES = { inherit: 'Same as main', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
+  // The local one runs on this PC through Ollama (see src/router.js); the name must match LOCAL_MODEL there.
+  const MODEL_NAMES = {
+    inherit: 'Same as main', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku',
+    'lemon-qwen3-coder': 'Local: Qwen3 Coder',
+  };
   const EFFORT_NAMES = { inherit: 'Same as main', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
 
   // ---- Citron --------------------------------------------------------------

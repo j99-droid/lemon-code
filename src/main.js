@@ -10,6 +10,7 @@ const { Usage } = require('./usage');
 const { ChatFeed } = require('./chat');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 const { MODELS, EFFORTS, DEFAULT_MODEL, DEFAULT_EFFORT } = require('./power');
+const { startRouter, LOCAL_MODEL } = require('./router');
 
 const ROOT = path.join(__dirname, '..');
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
@@ -56,6 +57,7 @@ function claudeExe() {
 // ---- hooks: Claude Code -> local HTTP -> Citron ----------------------------
 
 let hookPort = 0;
+let routerPort = 0; // local model router, see router.js
 let win = null;
 const send = (ch, ...args) => { if (win && !win.isDestroyed()) win.webContents.send(ch, ...args); };
 
@@ -160,7 +162,10 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers)), '--append-system-prompt', helperHint(helpers));
   if (resume) args.push('--resume', resume);
   if (prompt) args.push(prompt.replace(/\s*\n+\s*/g, ' '));
-  const tab = spawnTerminal({ title, cwd, file: exe, args });
+  // Only sessions with a local helper go through the router; the others talk to Anthropic as before.
+  const usesLocal = helpers.some((a) => a.model === LOCAL_MODEL);
+  const extraEnv = usesLocal ? { ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}` } : {};
+  const tab = spawnTerminal({ title, cwd, file: exe, args, extraEnv });
   const t = tabs.get(tab.id);
   t.agentIds = helpers.map((a) => a.id);
   if (resume) followSession(tab.id, resume);
@@ -196,12 +201,12 @@ const STARTER_AGENTS = [
     role: 'Reviews finished changes for bugs, missed edge cases and security problems, and lists what to fix. Use it before calling work done.' },
 ];
 
-function spawnTerminal({ title, cwd, file, args }) {
+function spawnTerminal({ title, cwd, file, args, extraEnv = {} }) {
   const id = `t${nextTab++}`;
   cwd = cwd || os.homedir();
   const p = pty.spawn(file, args, {
     name: 'xterm-256color', cols: 120, rows: 32, cwd,
-    env: { ...cleanEnv(), LEMON_PORT: String(hookPort), LEMON_TAB: id, COLORTERM: 'truecolor' },
+    env: { ...cleanEnv(), LEMON_PORT: String(hookPort), LEMON_TAB: id, COLORTERM: 'truecolor', ...extraEnv },
   });
   const tab = { pty: p, cwd, title, sessionId: null };
   tabs.set(id, tab);
@@ -378,6 +383,8 @@ ipcMain.handle('templates:delete', (_e, id) => {
   saveConfig();
   return config.templates;
 });
+// The model names the helper editor offers. The model goes onto the command line, so anything else is refused.
+const AGENT_MODELS = ['inherit', 'haiku', 'sonnet', 'opus', 'fable', LOCAL_MODEL];
 ipcMain.handle('agents:save', (_e, a) => {
   const id = a.id || `agent-${Date.now().toString(36)}`;
   const name = String(a.name || 'Helper').slice(0, 40);
@@ -385,7 +392,8 @@ ipcMain.handle('agents:save', (_e, a) => {
   while (config.agents.some((x) => x.key === key && x.id !== id)) key += '-2';
   const agent = {
     id, key, name, role: String(a.role || '').trim() || `Helps with ${name.toLowerCase()} work.`,
-    prompt: String(a.prompt || '').trim(), model: a.model || 'inherit', effort: a.effort || 'inherit',
+    prompt: String(a.prompt || '').trim(),
+    model: AGENT_MODELS.includes(a.model) ? a.model : 'inherit', effort: a.effort || 'inherit',
   };
   const i = config.agents.findIndex((x) => x.id === id);
   if (i >= 0) config.agents[i] = agent; else config.agents.push(agent);
@@ -452,6 +460,7 @@ ipcMain.handle('open:folder', (_e, dir) => shell.openPath(dir));
 
 app.whenReady().then(async () => {
   await startHookServer();
+  routerPort = (await startRouter()).address().port;
   writeHookSettings();
   usage.on('update', (s) => send('usage', s));
   usage.on('assistant-text', ({ session, text }) => {

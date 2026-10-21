@@ -19,6 +19,10 @@ project templates. How it works and the file map: README.md.
   the ones started here, would send events to Citron.
 - `src/hook.js` must print nothing (UserPromptSubmit output goes into Claude's context) and always exit 0.
 - The PTY is `@lydell/node-pty` because it ships Windows prebuilds (plain `node-pty` needs Visual Studio).
+- A subagent can't pick its own API server, so a helper on a local model goes through `src/router.js`, which
+  `ANTHROPIC_BASE_URL` points at. Only sessions with a local helper get that variable; keep it that way, since the
+  router sees every call. The name `lemon-qwen3-coder` is in three places (`src/router.js`, the Modelfile, and
+  the helper list in `src/renderer/app.js`): change them together.
 - The meter's main number is input + output + cache writes; cache reads are shown but not counted. Messages are
   deduped by message id + request id (Claude Code writes one line per content block).
 - Citron is drawn in code (`src/renderer/citron.js`), not image files. `npm run icon` redraws the app icon from it.

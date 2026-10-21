@@ -24,6 +24,18 @@ isn't installed, the home page has an Install button, which runs Anthropic's off
 Citron's reactions come from a small hook server that LemonCode starts on `127.0.0.1` (a random local port). Only
 sessions LemonCode starts are sent to it, but it has no password, so other programs on your PC could post to it.
 
+## Local helpers (optional)
+A helper can run on a model on your PC instead of Claude. It needs [Ollama](https://ollama.com) (0.14 or newer) and
+the Qwen3 Coder model, made once:
+```
+ollama pull qwen3-coder:30b
+ollama create lemon-qwen3-coder -f tools/local-model/Modelfile
+```
+Then pick **Local: Qwen3 Coder** as a helper's model. Only sessions with a local helper use the local router
+(`src/router.js`): it sends that helper's calls to Ollama and everything else to Anthropic, so your Claude sign-in
+is unchanged. The main Claude is always Claude. Ollama must be running when the helper is used (it runs in the
+tray after install). The model needs about 19 GB of disk and runs best with 16 GB of GPU memory or more.
+
 ## What's on screen
 - **Type box** (home page): type what you want, press Enter. With **Blank** picked, LemonCode makes a folder in
   the projects folder (default `~\Lemon Projects`) named from your words, with git, AGENTS.md, CLAUDE.md
@@ -61,6 +73,9 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
 | `src/usage.js` | Reads transcripts for token totals, 5h window and the session list |
 | `src/chat.js` | Follows one session's transcript and picks out the chat messages for the chat view |
 | `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
+| `src/router.js` | Local model router: sends a local helper's calls to Ollama, the rest to Anthropic |
+| `test/router.test.js` | Tests for where the router sends each call (`npm test`) |
+| `tools/local-model/Modelfile` | Makes the `lemon-qwen3-coder` model with a 32K context (see Local helpers) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |
 | `src/templates.js` | Folder naming, prompt building, AGENTS.md skeleton |
 | `src/power.js` | The model and effort slider lists, in slider order, and the defaults |
