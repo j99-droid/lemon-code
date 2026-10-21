@@ -7,6 +7,7 @@
   let config = boot.config;
   let usage = boot.usage;
   let sessions = boot.sessions;
+  $('stripVersion').textContent = `v${boot.version}`;
 
   // ---- helpers -------------------------------------------------------------
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -21,7 +22,11 @@
   };
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
-  const MODEL_NAMES = { inherit: 'Same as main', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
+  // The local one runs on this PC through Ollama (see src/router.js); the name must match LOCAL_MODEL there.
+  const MODEL_NAMES = {
+    inherit: 'Same as main', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku',
+    'lemon-qwen3-coder': 'Local: Qwen3 Coder',
+  };
   const EFFORT_NAMES = { inherit: 'Same as main', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
 
   // ---- Citron --------------------------------------------------------------
@@ -681,6 +686,7 @@
     $('meterPop').innerHTML = `
       <div class="pop-big">${fmt(u.today.main)}<small>${b ? `of ${fmt(b)} today` : 'today'}</small></div>
       <div class="pop-sub">+ ${fmt(u.today.cacheRead)} cache reads (cheap, not counted) · in ${fmt(u.today.input)} · out ${fmt(u.today.output)} · cache writes ${fmt(u.today.cacheWrite)}</div>
+      <div class="pop-sub">Local model (Qwen3 Coder, this PC): ${fmt(u.localToday.main)} today · 5h window ${u.localWindow ? `${fmt(u.localWindow.main)}, resets in ${until(u.localWindow.end)}` : 'not started'}. Kept out of the numbers above.</div>
       <div class="pop-grid">
         <div class="pop-stat"><b>${w ? until(w.end) : '–'}</b><span>${w ? `until the 5h window resets · ${fmt(w.main)} used` : '5h window not started'}</span></div>
         <div class="pop-stat"><b style="color:${projColour}">${fmt(u.projection)}</b><span>today at this pace</span></div>
@@ -691,7 +697,7 @@
         ${b ? `<div class="budget-line" style="bottom:${(b / max) * 100}%"></div>` : ''}</div>
       <div class="bar-labels">${days.map((d) => `<span>${d.day === 'today' ? 'today' : new Date(d.day + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' })}</span>`).join('')}</div>
       <div class="pop-budget"><input id="budgetInput" type="text" placeholder="Daily budget, e.g. 2M or 1500k" value="${config.dailyBudget ? fmt(config.dailyBudget) : ''}"><button class="btn primary" id="budgetSave">Save</button></div>
-      <div class="pop-note">${config.dailyBudget ? 'Clear the box to go back to your 14-day average.' : `Using your 14-day average (${fmt(u.avg14active)}) until you set one.`} Counts input + output + cache writes across all Claude Code sessions (helpers included), desktop app too.</div>`;
+      <div class="pop-note">${config.dailyBudget ? 'Clear the box to go back to your 14-day average.' : `Using your 14-day average (${fmt(u.avg14active)}) until you set one.`} Counts input + output + cache writes across all Claude Code sessions (helpers included), desktop app too. Local-model calls are not counted.</div>`;
     $('budgetSave').onclick = saveBudget;
     $('budgetInput').onkeydown = (e) => { if (e.key === 'Enter') saveBudget(); };
   }

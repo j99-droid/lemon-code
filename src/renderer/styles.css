@@ -330,6 +330,7 @@ select { font: inherit; }
 .bubble { border-top-color: #f6f3e8; }
 .bubble.needs { border-top-color: #ffe0d6; }
 .strip-status { position: absolute; right: 18px; bottom: 22px; color: var(--faint); font: 11px var(--pixel); }
+.strip-version { position: absolute; left: 18px; bottom: 22px; color: var(--faint); font: 11px var(--pixel); }
 
 /* ---- popover + modals -------------------------------------------------- */
 .popover {
