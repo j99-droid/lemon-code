@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citron Sprite Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #111215; --panel: #1a1c21; --panel2: #22252b; --line: #2d3038;
+    --text: #e9e9ec; --muted: #8b8f99; --lemon: #ffd23f; --coral: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 Inter, system-ui, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font: 28px Silkscreen, monospace; margin: 0 0 4px; color: var(--lemon); letter-spacing: 1px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+          display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .card canvas { width: 128px; height: 128px; image-rendering: pixelated; }
+  .name { font: 14px Silkscreen, monospace; color: var(--lemon); }
+  .when { color: var(--muted); font-size: 12.5px; text-align: center; }
+  h2 { font: 16px Silkscreen, monospace; color: var(--text); margin: 36px 0 12px; }
+  .strip { position: relative; height: 120px; background: var(--panel); border: 1px solid var(--line);
+           border-radius: 14px; overflow: hidden; }
+  .strip canvas { position: absolute; bottom: 8px; width: 96px; height: 96px; image-rendering: pixelated; }
+  .bubble { position: absolute; bottom: 86px; background: #f6f3e8; color: #23180a; font: 12px Silkscreen, monospace;
+            padding: 6px 10px; border-radius: 4px; white-space: nowrap; box-shadow: 3px 3px 0 #00000055;
+            transform: translateX(-50%); transition: opacity .2s; }
+  .bubble::after { content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -6px;
+                   border: 6px solid transparent; border-top-color: #f6f3e8; border-bottom: 0; }
+  .hero { display: flex; gap: 24px; align-items: center; margin-bottom: 28px; flex-wrap: wrap; }
+  .hero canvas { width: 192px; height: 192px; image-rendering: pixelated; background: var(--panel);
+                 border: 1px solid var(--line); border-radius: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <canvas id="hero"></canvas>
+    <div>
+      <h1>Citron</h1>
+      <p class="sub">32&times;32 pixel lemon, Claude starburst for a leaf. Shown 4&ndash;6&times; size. Click a pose to see it big.</p>
+    </div>
+  </div>
+  <div class="grid" id="grid"></div>
+
+  <h2>In the app's bottom strip</h2>
+  <div class="strip" id="strip"><div class="bubble" id="bubble"></div><canvas id="walker"></canvas></div>
+</main>
+<script src="../src/renderer/citron.js"></script>
+<script>
+  const poses = [
+    ['idle', 'Waiting, blinks now and then'],
+    ['walk', 'Strolling along the strip'],
+    ['thinking', 'You sent a prompt'],
+    ['typing', 'Claude is writing a reply'],
+    ['coding', 'Running a tool / editing files'],
+    ['focused', 'Long tool run or big edit'],
+    ['happy', 'Turn finished / COMPLETE'],
+    ['chill', 'Quiet for a minute'],
+    ['needs', 'Waiting for your approval'],
+  ];
+  const hero = Citron.animate(document.getElementById('hero'), 'happy');
+  const grid = document.getElementById('grid');
+  for (const [p, when] of poses) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<canvas></canvas><div class="name">${p}</div><div class="when">${when}</div>`;
+    card.onclick = () => hero.setPose(p);
+    grid.appendChild(card);
+    Citron.animate(card.querySelector('canvas'), p);
+  }
+
+  // Walker demo: stroll, stop, act out a state with a bubble, repeat.
+  const strip = document.getElementById('strip'), bubble = document.getElementById('bubble');
+  const walker = Citron.animate(document.getElementById('walker'), 'walk');
+  const script = [
+    ['thinking', 'Hmm...'], ['coding', 'Editing lights.yaml'], ['typing', null],
+    ['needs', 'Need you!'], ['happy', 'Done! 🍋'], ['chill', 'Taking it easy'],
+  ];
+  let x = 40, dir = 1, step = 0, pause = 0;
+  function place() {
+    const c = document.getElementById('walker');
+    c.style.left = (x - 48) + 'px';
+    bubble.style.left = x + 'px';
+  }
+  setInterval(() => {
+    const w = strip.clientWidth;
+    if (pause > 0) { pause--; if (pause === 0) { walker.setPose('walk'); bubble.style.opacity = 0; } return; }
+    x += dir * 2;
+    if (x > w - 60) dir = -1;
+    if (x < 60) dir = 1;
+    walker.setFlip(dir < 0);
+    if (Math.random() < 0.012) {
+      const [p, text] = script[step++ % script.length];
+      walker.setPose(p); pause = 70;
+      bubble.textContent = text || '';
+      bubble.style.opacity = text ? 1 : 0;
+    }
+    place();
+  }, 50);
+  bubble.style.opacity = 0; place();
+</script>
+</body>
+</html>

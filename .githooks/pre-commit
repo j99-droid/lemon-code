@@ -1,0 +1,10 @@
+#!/bin/sh
+# Refuse to commit secrets, .storage folders, databases, logs or private keys.
+# Enabled per clone with:  git config core.hooksPath .githooks
+blocked=$(git diff --cached --name-only --diff-filter=ACMR |
+  grep -E '(^|/)secrets\.yaml$|(^|/)\.storage/|\.db(-wal|-shm)?$|\.log$|(^|/)(id_[a-z0-9]+|[^/]*private[^/]*\.pem|[^/]*\.key)$')
+if [ -n "$blocked" ]; then
+  echo "pre-commit: refusing to commit these files (secrets, .storage, databases, logs or private keys):" >&2
+  echo "$blocked" | sed 's/^/  /' >&2
+  exit 1
+fi
