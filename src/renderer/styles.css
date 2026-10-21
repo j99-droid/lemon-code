@@ -186,7 +186,7 @@ select { font: inherit; }
 }
 .setup h2 { margin: 0; font-size: 18px; }
 .setup p, .setup .hint { color: var(--muted); margin: 0; font-size: 13px; }
-.setup .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.setup .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .setup .mode {
   display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px; border-radius: 12px;
   background: var(--panel2); border: 1px solid transparent;

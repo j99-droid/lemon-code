@@ -10,7 +10,7 @@ const { Usage } = require('./usage');
 const { ChatFeed } = require('./chat');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 const { MODELS, EFFORTS, DEFAULT_MODEL, DEFAULT_EFFORT } = require('./power');
-const { startRouter, LOCAL_MODEL } = require('./router');
+const { startRouter, LOCAL_MODEL, OLLAMA } = require('./router');
 const setup = require('./setup');
 
 const ROOT = path.join(__dirname, '..');
@@ -61,6 +61,7 @@ function claudeExe() {
 
 let hookPort = 0;
 let routerPort = 0; // local model router, see router.js
+let localRouterPort = 0; // router for the local-only setup: every call goes to Ollama
 let win = null;
 const send = (ch, ...args) => { if (win && !win.isDestroyed()) win.webContents.send(ch, ...args); };
 
@@ -158,16 +159,20 @@ function cleanEnv() {
 function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   const exe = claudeExe();
   if (!exe) throw new Error("Claude Code isn't installed yet. Open Getting started on the home page to install it.");
+  const localOnly = config.setup === 'local';
   const args = ['--settings', HOOKS_FILE];
-  args.push('--model', config.model, '--effort', config.effort);
+  args.push('--model', localOnly ? LOCAL_MODEL : config.model, '--effort', config.effort);
   if (config.mode && config.mode !== 'default') args.push('--permission-mode', config.mode);
   const helpers = config.agents.filter((a) => agentIds.includes(a.id));
-  if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers)), '--append-system-prompt', helperHint(helpers));
+  if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers, localOnly)), '--append-system-prompt', helperHint(helpers));
   if (resume) args.push('--resume', resume);
   if (prompt) args.push(prompt.replace(/\s*\n+\s*/g, ' '));
-  // Only sessions with a local helper go through the router; the others talk to Anthropic as before.
+  // Local-only sessions go through their own router. Otherwise only sessions with a local helper use the router;
+  // the others talk to Anthropic as before.
   const usesLocal = helpers.some((a) => a.model === LOCAL_MODEL);
-  const extraEnv = usesLocal ? { ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}` } : {};
+  let extraEnv = {};
+  if (localOnly) extraEnv = setup.localOnlyEnv(localRouterPort);
+  else if (usesLocal) extraEnv = { ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}` };
   const tab = spawnTerminal({ title, cwd, file: exe, args, extraEnv });
   const t = tabs.get(tab.id);
   t.agentIds = helpers.map((a) => a.id);
@@ -176,11 +181,12 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
 }
 
 // Helper agents become Claude Code subagents via --agents (each with its own model and effort).
-function agentsJson(helpers) {
+function agentsJson(helpers, localOnly) {
   const out = {};
   for (const a of helpers) {
     const def = { description: a.role, prompt: a.prompt || `You are the ${a.name} on this project. ${a.role}` };
-    if (a.model && a.model !== 'inherit') def.model = a.model;
+    if (localOnly) def.model = LOCAL_MODEL; // Claude model names would have no account to run on
+    else if (a.model && a.model !== 'inherit') def.model = a.model;
     if (a.effort && a.effort !== 'inherit') def.effort = a.effort;
     out[a.key] = def;
   }
@@ -491,6 +497,7 @@ ipcMain.handle('open:folder', (_e, dir) => shell.openPath(dir));
 app.whenReady().then(async () => {
   await startHookServer();
   routerPort = (await startRouter()).address().port;
+  localRouterPort = (await startRouter({ local: OLLAMA, remote: OLLAMA })).address().port;
   writeHookSettings();
   usage.on('update', (s) => send('usage', s));
   usage.on('assistant-text', ({ session, text }) => {

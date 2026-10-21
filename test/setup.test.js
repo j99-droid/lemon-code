@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
-const { hasLocalModel, isReady, ollamaModels, psQuote, modelSetupScript, MODES } = require('../src/setup');
+const { hasLocalModel, isReady, localOnlyEnv, ollamaModels, psQuote, modelSetupScript, MODES } = require('../src/setup');
 const { LOCAL_MODEL } = require('../src/router');
 
 const READY = { ollama: { installed: true, running: true, modelReady: true } };
@@ -23,9 +23,26 @@ test('local helpers need Claude Code and a running Ollama with the model', () =>
   assert.strictEqual(isReady('local-helpers', { claude: true, ...noModel }), false);
 });
 
+test('local only needs the Claude program and the local model, but no account', () => {
+  assert.strictEqual(isReady('local', { claude: true, ...READY }), true);
+  assert.strictEqual(isReady('local', { claude: false, ...READY }), false);
+  assert.strictEqual(isReady('local', { claude: true, ...NOT_READY }), false);
+});
+
 test('no setup chosen is never ready', () => {
   assert.strictEqual(isReady(null, { claude: true, ...READY }), false);
-  assert.deepStrictEqual(MODES, ['claude', 'local-helpers']);
+  assert.deepStrictEqual(MODES, ['claude', 'local-helpers', 'local']);
+});
+
+test('the local-only environment sends every model name and call to the local router', () => {
+  const env = localOnlyEnv(4321);
+  assert.strictEqual(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4321');
+  for (const key of ['ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL']) {
+    assert.strictEqual(env[key], LOCAL_MODEL, key);
+  }
+  assert.strictEqual(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, '1');
+  assert.ok(!('ANTHROPIC_API_KEY' in env), 'a real key must not be passed in');
 });
 
 test('the model is found whatever tag Ollama lists it under', () => {

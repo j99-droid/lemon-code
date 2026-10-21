@@ -508,8 +508,11 @@
   const SETUP_MODES = [
     { id: 'claude', name: 'Claude account', text: 'Sign in with your Claude plan. Everything runs on Claude.' },
     { id: 'local-helpers', name: 'Claude + local helpers', text: 'Claude as usual, and helpers that run a model on this PC through Ollama.' },
+    { id: 'local', name: 'Local only', text: 'Every session runs on a model on this PC through Ollama. No Claude account.' },
   ];
   let setupMode = config.setup;
+  // The main model is fixed in local-only mode, so the Model slider has nothing to choose.
+  $('modelLabel').hidden = setupMode === 'local';
   let setupStatus = null; // from setup:status: { claude, ollama: { installed, running, modelReady }, ready }
   let setupOpen = false;
   let setupChecked = false;
@@ -519,7 +522,9 @@
     + `<div class="step-action">${done ? '' : action}</div></div>`;
   function setupSteps() {
     const s = setupStatus, o = s.ollama;
-    const claude = stepRow(s.claude, 'Claude Code', 'Sign in with your Claude account the first time a project starts.',
+    const claudeNote = setupMode === 'local' ? 'The program only. No Claude account is used.'
+      : 'Sign in with your Claude account the first time a project starts.';
+    const claude = stepRow(s.claude, 'Claude Code', claudeNote,
       '<button class="btn primary" data-do="claude">Install Claude Code</button>');
     if (setupMode === 'claude') return claude;
     const ollamaNote = o.installed && o.running ? 'Running.'
@@ -554,7 +559,11 @@
   }
   $('setupCard').onclick = async (e) => {
     const pick = e.target.closest('[data-mode]');
-    if (pick) { setupMode = await api.chooseSetup(pick.dataset.mode); return refreshSetup(); }
+    if (pick) {
+      setupMode = await api.chooseSetup(pick.dataset.mode);
+      $('modelLabel').hidden = setupMode === 'local';
+      return refreshSetup();
+    }
     const b = e.target.closest('[data-do]');
     if (!b) return;
     const what = b.dataset.do;

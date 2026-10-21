@@ -15,9 +15,9 @@ const OLLAMA_INSTALL_COMMAND = 'winget install --id Ollama.Ollama -e --accept-pa
 const OLLAMA_DOWNLOAD_PAGE = 'https://ollama.com/download';
 const TAGS_TIMEOUT_MS = 1500;
 
-// Which setup the user picked. The main session is always Claude (see router.js), so a local-only mode
-// would still need a Claude sign-in; only helpers can run locally.
-const MODES = ['claude', 'local-helpers'];
+// Which setup the user picked. 'local-helpers' keeps the main session on Claude and only helpers run locally.
+// 'local' runs every session on the local model: Claude Code is still the program, but no account is used.
+const MODES = ['claude', 'local-helpers', 'local'];
 
 function ollamaExe() {
   const installed = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
@@ -61,8 +61,24 @@ function isReady(mode, status) {
   const claudeOk = !!status.claude;
   const localOk = status.ollama.installed && status.ollama.running && status.ollama.modelReady;
   if (mode === 'claude') return claudeOk;
-  if (mode === 'local-helpers') return claudeOk && localOk;
+  if (mode === 'local-helpers' || mode === 'local') return claudeOk && localOk;
   return false;
+}
+
+// Environment for a session that runs only on the local model. Every model name Claude Code uses (its main
+// model, its small fast model, the aliases) points at the local one, and the token stops the sign-in prompt.
+// Calls go through the router, which sends them all to Ollama. The non-essential traffic switch turns off
+// telemetry and the updater, the only other calls Claude Code makes to Anthropic.
+function localOnlyEnv(routerPort) {
+  return {
+    ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}`,
+    ANTHROPIC_AUTH_TOKEN: 'ollama', // any value works; the local router ignores it
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: LOCAL_MODEL,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: LOCAL_MODEL,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: LOCAL_MODEL,
+    ANTHROPIC_SMALL_FAST_MODEL: LOCAL_MODEL,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  };
 }
 
 // PowerShell single-quoted string: the only escape is a doubled quote.
@@ -77,5 +93,5 @@ function modelSetupScript(exe) {
 
 module.exports = {
   MODES, OLLAMA_INSTALL_COMMAND, OLLAMA_DOWNLOAD_PAGE, ollamaExe, ollamaModels, ollamaStatus, hasLocalModel,
-  isReady, psQuote, modelSetupScript,
+  isReady, localOnlyEnv, psQuote, modelSetupScript,
 };
