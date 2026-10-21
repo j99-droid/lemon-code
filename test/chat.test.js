@@ -104,6 +104,21 @@ test('a helper shows its task, what it does, what it says and when it finishes, 
   assert.deepStrictEqual(seen[1].helper, { run: 'a1', key: 'researcher', name: 'Researcher', icon: '🔎' });
 });
 
+test('a hand-back the local model wrote as text is hidden; its real report still shows', () => {
+  const { file, sub } = helperSetup();
+  fs.writeFileSync(path.join(sub, 'agent-a4.meta.json'), JSON.stringify({ agentType: 'researcher', description: 'Add', finished: false }));
+  fs.writeFileSync(path.join(sub, 'agent-a4.jsonl'),
+    row({ uuid: 'h0', timestamp: at(1), isSidechain: true, type: 'user', message: { role: 'user', content: 'Add' } })
+    + row({ uuid: 'h1', timestamp: at(2), isSidechain: true, type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'text', text: 'SubagentHandback({message:"Done"})' }, { type: 'text', text: 'Done.' }] } }));
+  const feed = new ChatFeed('s1', identify);
+  feed.file = file;
+  const seen = [];
+  feed.on('messages', (m) => seen.push(...m));
+  feed.read();
+  assert.deepStrictEqual(seen.filter((m) => m.kind === 'text').map((m) => m.text), ['Done.']);
+});
+
 test('a helper file is not read until its meta file says which helper it is', () => {
   const { file, sub } = helperSetup();
   fs.writeFileSync(path.join(sub, 'agent-a2.jsonl'), row({ uuid: 'h0', timestamp: at(1), isSidechain: true, type: 'user', message: { role: 'user', content: 'Count' } }));

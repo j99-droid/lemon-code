@@ -17,11 +17,20 @@ const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te',
   'trailer', 'content-length', 'host']);
 
-// Anything that isn't a local-model call (a GET, a body without a model) keeps going to Anthropic.
-function pickTarget(body, targets) {
-  let model = null;
-  try { model = JSON.parse(body).model; } catch { /* not JSON */ }
-  return model === LOCAL_MODEL ? targets.local : targets.remote;
+// Claude Code sends the session's or helper's effort as output_config.effort, and Ollama makes it gpt-oss's
+// thinking level. On a small coding task gpt-oss "high" thought for over a minute and hit 8,000 tokens without
+// answering (medium ~7 s, low ~2 s), so Claude's names move one step down: Claude's usual "high" is gpt-oss medium.
+const LOCAL_EFFORT = { low: 'low', medium: 'low', high: 'medium', xhigh: 'high', max: 'high' };
+
+function parseRequest(body) {
+  try { return JSON.parse(body); } catch { return null; } // a GET, or not JSON
+}
+
+// The body for Ollama: the same bytes unless there's an effort to move down.
+function localBody(body, request) {
+  const effort = request.output_config && request.output_config.effort;
+  if (!LOCAL_EFFORT[effort]) return body;
+  return JSON.stringify({ ...request, output_config: { ...request.output_config, effort: LOCAL_EFFORT[effort] } });
 }
 
 function copyHeaders(headers) {
@@ -70,9 +79,11 @@ function startRouter(targets = { local: OLLAMA, remote: ANTHROPIC }) {
       });
       req.on('end', () => {
         if (res.writableEnded) return;
+        // Anything that isn't a local-model call (a GET, a body without a model) keeps going to Anthropic unchanged.
         const body = Buffer.concat(chunks);
-        const target = pickTarget(body, targets);
-        forward(req, res, body, target, target === targets.local);
+        const request = parseRequest(body);
+        if (request && request.model === LOCAL_MODEL) forward(req, res, localBody(body, request), targets.local, true);
+        else forward(req, res, body, targets.remote, false);
       });
     });
     server.listen(0, '127.0.0.1', () => resolve(server));

@@ -211,6 +211,9 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   const args = ['--settings', HOOKS_FILE];
   args.push('--model', localOnly ? LOCAL_MODEL : config.model, '--effort', config.effort);
   if (config.mode && config.mode !== 'default') args.push('--permission-mode', config.mode);
+  // The user's MCP servers add their tool definitions to every call, which the local model reads from scratch
+  // and which crowd its 64K window. With no --mcp-config, strict mode loads none.
+  if (localOnly) args.push('--strict-mcp-config');
   const helpers = config.agents.filter((a) => agentIds.includes(a.id));
   if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers, localOnly)), '--append-system-prompt', helperHint(helpers, localOnly));
   if (resume) args.push('--resume', resume);
@@ -247,8 +250,9 @@ function agentsJson(helpers, localOnly) {
 
 const LOCAL_HELPER_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'];
 
-// Ollama answers one call at a time and keeps one prompt cache, so local helpers running side by side queue
-// behind each other and each switch re-reads a 15-30K token prompt. Measured: calls took 30-90 s instead of ~2 s.
+// Ollama answers one call at a time, so local helpers running side by side queue behind each other, and with
+// several in flight its log showed whole 15-30K token prompts being read again. Calls took 30-90 s instead of ~2 s.
+// One at a time is cheap: Ollama's prompt cache keeps both the main prompt and the helper's.
 function helperHint(helpers, localOnly) {
   const list = helpers.map((a) => `${a.key} (${a.role})`).join('; ');
   const local = helpers.filter((a) => localOnly || a.model === LOCAL_MODEL).map((a) => a.key);

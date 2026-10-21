@@ -7,7 +7,10 @@ const { EventEmitter } = require('events');
 const { PROJECTS } = require('./usage');
 const { describeTool } = require('./activity');
 
-const POLL_MS = 500;
+// New lines are read when the transcript folder changes. The poll only catches a change the watcher missed.
+const POLL_MS = 2000;
+// Claude Code writes a line in more than one go at times; a short wait reads it whole in one pass.
+const WATCH_SETTLE_MS = 30;
 // User lines Claude Code writes itself: slash-command echoes, local command output, reminders.
 const INTERNAL_USER_TEXT = /^\s*(<(command-|local-command-|system-reminder|bash-|task-notification|user-memory)|Caveat:)/;
 const INTERRUPTED = /^\[Request interrupted by user/;
@@ -15,6 +18,8 @@ const INTERRUPTED = /^\[Request interrupted by user/;
 const HANDBACK_TOOL = 'SubagentHandback';
 const HIDDEN_TOOL = 'SendFeedback';
 const HELPER_FILE = /^agent-([\w-]+)\.jsonl$/;
+// The local model sometimes writes its hand-back as text instead of calling the tool. The real report follows.
+const HANDBACK_AS_TEXT = /^\s*SubagentHandback\s*\(/;
 
 const blockText = (content) => (typeof content === 'string' ? content
   : Array.isArray(content) ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n\n') : '');
@@ -67,7 +72,7 @@ function helperMessages(j, who, helperName) {
   j.message.content.forEach((b, i) => {
     const id = `${j.uuid}-${i}`;
     if (b.type === 'text') {
-      if (b.text && b.text.trim()) out.push({ id, role: 'helper', kind: 'text', text: b.text.trim(), helper: who });
+      if (b.text && b.text.trim() && !HANDBACK_AS_TEXT.test(b.text)) out.push({ id, role: 'helper', kind: 'text', text: b.text.trim(), helper: who });
       return;
     }
     if (b.type !== 'tool_use' || b.name === HIDDEN_TOOL) return;
@@ -187,6 +192,8 @@ class ChatFeed extends EventEmitter {
     this.tail = null;
     this.helpers = null;
     this.timer = null;
+    this.watcher = null;
+    this.pending = null;
   }
 
   // Separate from the constructor so the caller can listen before the first read sends the history.
@@ -201,6 +208,7 @@ class ChatFeed extends EventEmitter {
     if (!this.tail) {
       this.tail = new LineTail(this.file);
       this.helpers = new HelperFeed(path.join(path.dirname(this.file), this.sessionId, 'subagents'), this.identify);
+      if (this.timer) this.watch(); // only once start() has run: tests read by hand
     }
     const items = [];
     let ts = 0;
@@ -217,7 +225,20 @@ class ChatFeed extends EventEmitter {
     this.emit('messages', items.sort((a, b) => a.ts - b.ts).map((x) => x.message));
   }
 
-  stop() { clearInterval(this.timer); }
+  // The project folder holds every session's files; this session's transcript and helper files start with its id.
+  watch() {
+    this.watcher = fs.watch(path.dirname(this.file), { recursive: true }, (_event, name) => {
+      if (!name || !name.startsWith(this.sessionId) || this.pending) return;
+      this.pending = setTimeout(() => { this.pending = null; this.read(); }, WATCH_SETTLE_MS);
+    });
+    this.watcher.on('error', () => { this.watcher.close(); this.watcher = null; }); // the poll carries on
+  }
+
+  stop() {
+    clearInterval(this.timer);
+    clearTimeout(this.pending);
+    if (this.watcher) this.watcher.close();
+  }
 }
 
 module.exports = { ChatFeed, chatMessage };

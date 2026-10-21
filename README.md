@@ -40,13 +40,19 @@ Then pick **Local: GPT-OSS 20B** as a helper's model. Only sessions with a local
 is unchanged. The main Claude is always Claude. Ollama must be running when the helper is used (it runs in the
 tray after install). The model is about 13 GB and fits fully in 16 GB of GPU memory.
 
-Local helpers are told to work one job at a time. Ollama answers one call at a time with one prompt cache, so two
-local helpers side by side queue behind each other and keep re-reading their 15-30K token prompts: in testing on
-an RTX 4080 Super, calls took 30-90 s instead of about 2 s.
+Speed (measured on an RTX 4080 Super with two small edits handed to a local helper):
+- Local helpers are told to work one job at a time. Ollama answers one call at a time, so helpers side by side
+  queued behind each other and calls took 30-90 s. One at a time, its prompt cache keeps each prompt warm.
+- A helper's **effort** is how long gpt-oss thinks. The router moves Claude's names one step down (low and medium
+  are gpt-oss low, high is medium, extra high and max are high): gpt-oss high thought for over a minute on a
+  small function without answering. With LocalCoder on High, the test went from about 80 s to 41 s.
+- A second Ollama slot (`OLLAMA_NUM_PARALLEL=2`) was tested and isn't needed: with one job at a time, the main
+  prompt and the helper's take turns at 0.4-0.8 s a call from the cache.
 
 **Local only** (the setup panel) runs every session on that model instead: no Claude account is used, and calls
-go to Ollama only. Claude Code is still needed as the program that runs the session. The model is smaller and
-weaker than Claude, and its context window is 64K, so long sessions lose their oldest messages.
+go to Ollama only. Claude Code is still needed as the program that runs the session. Your MCP servers are left
+out (`--strict-mcp-config`) so their tools don't fill the prompt; it still starts at about 36K tokens. The model
+is smaller and weaker than Claude, and its context window is 64K, so long sessions lose their oldest messages.
 
 ## What's on screen
 - **Type box** (home page): type what you want, press Enter. With **Blank** picked, LemonCode makes a folder in

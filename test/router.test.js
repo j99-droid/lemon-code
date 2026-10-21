@@ -54,6 +54,31 @@ test('a local-model call goes to the local server, with the body unchanged', asy
   }
 });
 
+test("a local-model call's effort moves one step down, since gpt-oss high runs away", async () => {
+  const env = await setup();
+  try {
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      const body = JSON.stringify({ model: LOCAL_MODEL, output_config: { effort }, messages: [] });
+      await fetch(`http://127.0.0.1:${env.port}/v1/messages`, { method: 'POST', body });
+    }
+    assert.deepStrictEqual(env.localLog.map((x) => JSON.parse(x.body).output_config.effort),
+      ['low', 'low', 'medium', 'high', 'high']);
+  } finally {
+    await env.close();
+  }
+});
+
+test("a Claude call's effort is not touched", async () => {
+  const env = await setup();
+  try {
+    const body = JSON.stringify({ model: 'claude-sonnet-5-5', output_config: { effort: 'high' }, messages: [] });
+    await fetch(`http://127.0.0.1:${env.port}/v1/messages`, { method: 'POST', body });
+    assert.strictEqual(env.remoteLog[0].body, body);
+  } finally {
+    await env.close();
+  }
+});
+
 test('a Claude call goes to Anthropic, with its login headers passed on', async () => {
   const env = await setup();
   try {

@@ -77,8 +77,12 @@ project templates. How it works and the file map: README.md.
 - The trust prompt's default is now "No, exit": a script that answers it must press Down before Enter.
 - The 5h/weekly bars come from a `statusLine` command in the `--settings` file (`src/statusline.js`), which posts
   `rate_limits` to the hook server's `/limits`. Only Pro/Max plans send them, and only after the first reply.
-- Local helpers are told to run one at a time (`helperHint`): Ollama has one slot and one prompt cache, so
-  parallel local helpers queue and re-read their whole prompt on every switch.
+- Local helpers are told to run one at a time (`helperHint`): Ollama answers one call at a time, so parallel
+  local helpers queue. One at a time, its prompt cache keeps both main and helper prompts warm (a second slot
+  was tested and gained nothing).
+- Claude Code sends effort as `output_config.effort`, which Ollama makes gpt-oss's thinking level. The router
+  moves it one step down (`LOCAL_EFFORT`): gpt-oss high ran past 8,000 tokens on a small function.
+- Local only sessions get `--strict-mcp-config`: MCP tool definitions go into every local call.
 - Open approvals are tracked by `tool_use_id` (PreToolUse/PostToolUse have it). `PermissionRequest` has none,
   so it's matched to the running call by tool + input. Denying (Esc) fires no hook at all: Esc in the
   terminal and the Chat button count as the answer. Tested with Ask first mode and Haiku.
