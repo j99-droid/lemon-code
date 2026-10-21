@@ -59,7 +59,8 @@ tray after install). The model needs about 19 GB of disk and runs best with 16 G
   at low effort, a huge arm with fire for Fable at max.
 - **Meter**: today's tokens against a daily budget (your 14-day average until you set one), the 5-hour window
   reset time, 7-day average, today's projection and a 7-day chart. Counts every Claude Code session, desktop
-  app included. Click it for details and to set the budget.
+  app included. Local-model calls (see Local helpers) have their own today total and 5-hour window, shown under
+  the Claude numbers and left out of them. Click it for details and to set the budget.
 - **COMPLETE**: asks "Is that all?", offers a commit if there are changes (never pushes), closes the session and
   moves it to Archived projects. If git has no name/email yet it asks once and saves them globally.
 - **Citron**: reacts to hooks from sessions started here: thinking, typing, coding (with what it's doing),
