@@ -55,6 +55,7 @@
     <div class="menu-wrap">
       <button class="tab menu-btn" id="menuBtn" title="More">⋯</button>
       <div class="menu" id="menu" hidden>
+        <button data-setup="1">🍋 Getting started</button>
         <button data-view="agents">🤝 Agents</button>
         <button data-view="recent">🕘 Recent</button>
         <button data-view="archive">▤ Archived projects <span id="archiveCount"></span></button>
@@ -64,11 +65,7 @@
 
   <main class="stage">
     <section class="page welcome" id="welcome">
-      <div class="setup" id="setupCard" hidden>
-        <strong>Claude Code isn't installed yet</strong>
-        <span>LemonCode runs the real Claude Code. Install it once, then sign in with your Claude account.</span>
-        <button class="btn primary" id="installBtn">Install Claude Code</button>
-      </div>
+      <section class="setup" id="setupCard" hidden></section>
       <h1>What are we building today?</h1>
       <div class="ask">
         <textarea id="askBox" rows="1" placeholder="Describe what you want to build, then press Enter"></textarea>

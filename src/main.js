@@ -10,7 +10,8 @@ const { Usage } = require('./usage');
 const { ChatFeed } = require('./chat');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 const { MODELS, EFFORTS, DEFAULT_MODEL, DEFAULT_EFFORT } = require('./power');
-const { startRouter, LOCAL_MODEL } = require('./router');
+const { startRouter, LOCAL_MODEL, OLLAMA } = require('./router');
+const setup = require('./setup');
 
 const ROOT = path.join(__dirname, '..');
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
@@ -37,12 +38,14 @@ const DEFAULTS = {
   lastAgents: [], // helpers picked on the home page last time
   sessionAgents: {}, // session id -> agent ids, so a resumed session gets its helpers back
   claudePath: null,
+  setup: null, // Getting started choice: one of MODES in setup.js. null = not chosen yet
 };
 let config = { ...DEFAULTS };
 try { config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) }; } catch { /* first run */ }
 // Configs from before the sliders stored "default" (no flag was passed). Those become the slider defaults.
 if (!MODELS.includes(config.model)) config.model = DEFAULT_MODEL;
 if (!EFFORTS.includes(config.effort)) config.effort = DEFAULT_EFFORT;
+if (!setup.MODES.includes(config.setup)) config.setup = null;
 const saveConfig = () => {
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
@@ -58,6 +61,7 @@ function claudeExe() {
 
 let hookPort = 0;
 let routerPort = 0; // local model router, see router.js
+let localRouterPort = 0; // router for the local-only setup: every call goes to Ollama
 let win = null;
 const send = (ch, ...args) => { if (win && !win.isDestroyed()) win.webContents.send(ch, ...args); };
 
@@ -154,17 +158,21 @@ function cleanEnv() {
 
 function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   const exe = claudeExe();
-  if (!exe) throw new Error("Claude Code isn't installed yet. Use the Install button on the home page.");
+  if (!exe) throw new Error("Claude Code isn't installed yet. Open Getting started on the home page to install it.");
+  const localOnly = config.setup === 'local';
   const args = ['--settings', HOOKS_FILE];
-  args.push('--model', config.model, '--effort', config.effort);
+  args.push('--model', localOnly ? LOCAL_MODEL : config.model, '--effort', config.effort);
   if (config.mode && config.mode !== 'default') args.push('--permission-mode', config.mode);
   const helpers = config.agents.filter((a) => agentIds.includes(a.id));
-  if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers)), '--append-system-prompt', helperHint(helpers));
+  if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers, localOnly)), '--append-system-prompt', helperHint(helpers));
   if (resume) args.push('--resume', resume);
   if (prompt) args.push(prompt.replace(/\s*\n+\s*/g, ' '));
-  // Only sessions with a local helper go through the router; the others talk to Anthropic as before.
+  // Local-only sessions go through their own router. Otherwise only sessions with a local helper use the router;
+  // the others talk to Anthropic as before.
   const usesLocal = helpers.some((a) => a.model === LOCAL_MODEL);
-  const extraEnv = usesLocal ? { ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}` } : {};
+  let extraEnv = {};
+  if (localOnly) extraEnv = setup.localOnlyEnv(localRouterPort);
+  else if (usesLocal) extraEnv = { ANTHROPIC_BASE_URL: `http://127.0.0.1:${routerPort}` };
   const tab = spawnTerminal({ title, cwd, file: exe, args, extraEnv });
   const t = tabs.get(tab.id);
   t.agentIds = helpers.map((a) => a.id);
@@ -173,11 +181,12 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
 }
 
 // Helper agents become Claude Code subagents via --agents (each with its own model and effort).
-function agentsJson(helpers) {
+function agentsJson(helpers, localOnly) {
   const out = {};
   for (const a of helpers) {
     const def = { description: a.role, prompt: a.prompt || `You are the ${a.name} on this project. ${a.role}` };
-    if (a.model && a.model !== 'inherit') def.model = a.model;
+    if (localOnly) def.model = LOCAL_MODEL; // Claude model names would have no account to run on
+    else if (a.model && a.model !== 'inherit') def.model = a.model;
     if (a.effort && a.effort !== 'inherit') def.effort = a.effort;
     // Every tool definition is sent with each call. A local model has a 32K context, so it gets only what coding needs.
     if (a.model === LOCAL_MODEL) def.tools = LOCAL_HELPER_TOOLS;
@@ -372,6 +381,32 @@ ipcMain.handle('claude:install', () => attempt(() => spawnTerminal({
   args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'irm https://claude.ai/install.ps1 | iex'],
 })));
 
+// Getting started (the home page panel). The panel asks again on each check, so a finished install shows up.
+ipcMain.handle('setup:status', async (_e, mode) => {
+  const status = { claude: !!claudeExe(), ollama: await setup.ollamaStatus() };
+  return { ...status, ready: setup.isReady(mode, status) };
+});
+ipcMain.handle('setup:choose', (_e, mode) => {
+  if (!setup.MODES.includes(mode)) throw new Error(`Unknown setup "${mode}".`);
+  config.setup = mode;
+  saveConfig();
+  return mode;
+});
+// Winget installs Ollama; the terminal stays open afterwards so the result can be read.
+ipcMain.handle('setup:install-ollama', () => attempt(() => spawnTerminal({
+  title: 'Install Ollama', file: 'powershell.exe',
+  args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', setup.OLLAMA_INSTALL_COMMAND],
+})));
+ipcMain.handle('setup:open-ollama-page', () => shell.openExternal(setup.OLLAMA_DOWNLOAD_PAGE));
+ipcMain.handle('setup:pull-model', () => attempt(() => {
+  const exe = setup.ollamaExe();
+  if (!exe) throw new Error("Ollama isn't installed yet. Install it first, then press Check again.");
+  return spawnTerminal({
+    title: 'Local model', file: 'powershell.exe',
+    args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', setup.modelSetupScript(exe)],
+  });
+}));
+
 ipcMain.handle('templates:save', (_e, t) => {
   const tpl = {
     id: t.id || `tpl-${Date.now().toString(36)}`, name: String(t.name || 'Untitled').slice(0, 40),
@@ -466,6 +501,7 @@ ipcMain.handle('open:folder', (_e, dir) => shell.openPath(dir));
 app.whenReady().then(async () => {
   await startHookServer();
   routerPort = (await startRouter()).address().port;
+  localRouterPort = (await startRouter({ local: OLLAMA, remote: OLLAMA })).address().port;
   writeHookSettings();
   usage.on('update', (s) => send('usage', s));
   usage.on('assistant-text', ({ session, text }) => {

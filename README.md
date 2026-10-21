@@ -17,16 +17,20 @@ npm start
 ```
 Or double-click **LemonCode** on the Desktop (`npm run shortcut` makes it).
 
-LemonCode runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. If Claude Code
-isn't installed, the home page has an Install button, which runs Anthropic's official installer
-(`irm https://claude.ai/install.ps1 | iex`). The first session asks you to sign in with your Claude account.
+LemonCode runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. The first start
+opens **Getting started** on the home page. Pick one of three setups: **Claude account** (everything on Claude),
+**Claude + local helpers** (Claude as usual, helpers on a model here), or **Local only** (every session on a model
+here, no Claude account; see below). It checks Claude Code and Ollama and offers an Install button for each one
+that's missing. Claude Code's button runs Anthropic's official installer (`irm https://claude.ai/install.ps1 | iex`),
+and the first session of a Claude setup asks you to sign in with your Claude account. Reopen the panel any time from
+⋯ → Getting started.
 
 Citron's reactions come from a small hook server that LemonCode starts on `127.0.0.1` (a random local port). Only
 sessions LemonCode starts are sent to it, but it has no password, so other programs on your PC could post to it.
 
 ## Local helpers (optional)
 A helper can run on a model on your PC instead of Claude. It needs [Ollama](https://ollama.com) (0.14 or newer) and
-the GPT-OSS 20B model, made once:
+the GPT-OSS 20B model. Getting started installs Ollama with winget and downloads the model for you, or do it by hand:
 ```
 ollama pull gpt-oss:20b
 ollama create lemon-gpt-oss-20b -f tools/local-model/Modelfile
@@ -35,6 +39,10 @@ Then pick **Local: GPT-OSS 20B** as a helper's model. Only sessions with a local
 (`src/router.js`): it sends that helper's calls to Ollama and everything else to Anthropic, so your Claude sign-in
 is unchanged. The main Claude is always Claude. Ollama must be running when the helper is used (it runs in the
 tray after install). The model is about 13 GB and fits fully in 16 GB of GPU memory.
+
+**Local only** (the setup panel) runs every session on that model instead: no Claude account is used, and calls
+go to Ollama only. Claude Code is still needed as the program that runs the session. The model is smaller and
+weaker than Claude, and its context window is 32K, so long sessions lose their oldest messages.
 
 ## What's on screen
 - **Type box** (home page): type what you want, press Enter. With **Blank** picked, LemonCode makes a folder in
@@ -77,6 +85,8 @@ tray after install). The model is about 13 GB and fits fully in 16 GB of GPU mem
 | `src/router.js` | Local model router: sends a local helper's calls to Ollama, the rest to Anthropic |
 | `test/router.test.js` | Tests for where the router sends each call (`npm test`) |
 | `tools/local-model/Modelfile` | Makes the `lemon-gpt-oss-20b` model with a 32K context (see Local helpers) |
+| `src/setup.js` | Getting started checks: Claude Code, Ollama and the local model, and the install and pull commands |
+| `test/setup.test.js` | Tests for what counts as ready and how Ollama's answer is read (`npm test`) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |
 | `src/templates.js` | Folder naming, prompt building, AGENTS.md skeleton |
 | `src/power.js` | The model and effort slider lists, in slider order, and the defaults |
