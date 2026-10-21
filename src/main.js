@@ -1,4 +1,4 @@
-// Lemon Code main process: window, Claude Code terminals (node-pty), hook listener, usage meter, git.
+// LemonCode main process: window, Claude Code terminals (node-pty), hook listener, usage meter, git.
 const { app, BrowserWindow, ipcMain, Notification, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -12,6 +12,13 @@ const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 const ROOT = path.join(__dirname, '..');
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
 const HOOKS_FILE = path.join(app.getPath('userData'), 'hooks-settings.json');
+// The data folder is named after package.json, which was "lemon-code" before the LemonCode rename. Copy the
+// old config over on first start. Checks the file, not the folder: Electron may create the folder early.
+const OLD_CONFIG_FILE = path.join(app.getPath('appData'), 'lemon-code', 'config.json');
+if (!fs.existsSync(CONFIG_FILE) && fs.existsSync(OLD_CONFIG_FILE)) {
+  fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
+  fs.copyFileSync(OLD_CONFIG_FILE, CONFIG_FILE);
+}
 
 // ---- config ---------------------------------------------------------------
 
@@ -126,7 +133,7 @@ function pingUser(tabId, ev) {
 const tabs = new Map(); // id -> { pty, cwd, title, sessionId }
 let nextTab = 1;
 
-// If Lemon Code was started from inside another Claude session (e.g. the desktop app), that session's
+// If LemonCode was started from inside another Claude session (e.g. the desktop app), that session's
 // variables would make our Claude a "child": no transcripts, and traffic routed via the parent's proxy.
 function cleanEnv() {
   const env = { ...process.env };
@@ -274,7 +281,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1440, height: 920, minWidth: 1000, minHeight: 640,
     backgroundColor: '#111215',
-    title: 'Lemon Code',
+    title: 'LemonCode',
     icon: iconPath(),
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#16171b', symbolColor: '#c9c9cf', height: 58 },
