@@ -42,7 +42,7 @@ tray after install). The model is about 13 GB and fits fully in 16 GB of GPU mem
 
 **Local only** (the setup panel) runs every session on that model instead: no Claude account is used, and calls
 go to Ollama only. Claude Code is still needed as the program that runs the session. The model is smaller and
-weaker than Claude, and its context window is 32K, so long sessions lose their oldest messages.
+weaker than Claude, and its context window is 64K, so long sessions lose their oldest messages.
 
 ## What's on screen
 - **Type box** (home page): type what you want, press Enter. With **Blank** picked, LemonCode makes a folder in
@@ -84,7 +84,7 @@ weaker than Claude, and its context window is 32K, so long sessions lose their o
 | `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
 | `src/router.js` | Local model router: sends a local helper's calls to Ollama, the rest to Anthropic |
 | `test/router.test.js` | Tests for where the router sends each call (`npm test`) |
-| `tools/local-model/Modelfile` | Makes the `lemon-gpt-oss-20b` model with a 32K context (see Local helpers) |
+| `tools/local-model/Modelfile` | Makes the `lemon-gpt-oss-20b` model with a 64K context (see Local helpers) |
 | `src/setup.js` | Getting started checks: Claude Code, Ollama and the local model, and the install and pull commands |
 | `test/setup.test.js` | Tests for what counts as ready and how Ollama's answer is read (`npm test`) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |

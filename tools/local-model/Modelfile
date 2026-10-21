@@ -2,5 +2,6 @@
 #   ollama pull gpt-oss:20b
 #   ollama create lemon-gpt-oss-20b -f tools/local-model/Modelfile
 # Ollama's default context is too small for Claude Code's prompts, so the context size is set here.
+# src/router.js LOCAL_CONTEXT_TOKENS must match this number.
 FROM gpt-oss:20b
-PARAMETER num_ctx 32768
+PARAMETER num_ctx 65536

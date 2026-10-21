@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
 const { hasLocalModel, isReady, localOnlyEnv, ollamaModels, psQuote, modelSetupScript, MODES } = require('../src/setup');
-const { LOCAL_MODEL } = require('../src/router');
+const { LOCAL_MODEL, LOCAL_CONTEXT_TOKENS } = require('../src/router');
 
 const READY = { ollama: { installed: true, running: true, modelReady: true } };
 const NOT_READY = { ollama: { installed: false, running: false, modelReady: false } };
@@ -42,6 +42,7 @@ test('the local-only environment sends every model name and call to the local ro
     assert.strictEqual(env[key], LOCAL_MODEL, key);
   }
   assert.strictEqual(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, '1');
+  assert.strictEqual(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, String(LOCAL_CONTEXT_TOKENS));
   assert.ok(!('ANTHROPIC_API_KEY' in env), 'a real key must not be passed in');
 });
 
