@@ -3,7 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const on = (ch) => (fn) => ipcRenderer.on(ch, (_e, ...args) => fn(...args));
 
-contextBridge.exposeInMainWorld('lemon', {
+// Frames inside the page (the HTML previews in question cards) must not reach the bridge: they can write to terminals.
+if (window.top === window) contextBridge.exposeInMainWorld('lemon', {
   init: () => ipcRenderer.invoke('app:init'),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
@@ -28,6 +29,7 @@ contextBridge.exposeInMainWorld('lemon', {
   kill: (id) => ipcRenderer.invoke('pty:kill', id),
   sendChat: (id, text) => ipcRenderer.send('chat:send', id, text),
   chatHistory: (id) => ipcRenderer.invoke('chat:history', id),
+  answerQuestion: (id, toolUseId, answers) => ipcRenderer.invoke('ask:answer', { id, toolUseId, answers }),
 
   gitStatus: (id) => ipcRenderer.invoke('git:status', id),
   complete: (id, message) => ipcRenderer.invoke('complete', { id, message }),
@@ -40,6 +42,7 @@ contextBridge.exposeInMainWorld('lemon', {
   onChat: on('chat'),
   onHook: on('hook'),
   onUsage: on('usage'),
+  onLimits: on('limits'),
   onAssistantText: on('assistant-text'),
   onFocusTab: on('focus-tab'),
 });

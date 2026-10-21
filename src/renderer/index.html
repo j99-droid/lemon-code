@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:">
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-src 'self'">
 <title>LemonCode</title>
 <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&family=Inter:wght@400;500;600;700&display=swap">
@@ -37,15 +37,24 @@
       </label>
     </div>
     <div class="spacer"></div>
-    <button class="meter" id="meterBtn" title="Token usage">
-      <div class="meter-row">
-        <span class="meter-label">Today</span>
-        <span class="meter-num" id="meterToday">–</span>
-        <span class="meter-of" id="meterOf"></span>
-      </div>
-      <div class="meter-bar"><div class="meter-fill" id="meterFill"></div></div>
-      <div class="meter-window" id="meterWindow">5h window idle</div>
-    </button>
+    <div class="meters">
+      <button class="meter" id="meter5h" title="5-hour limit">
+        <div class="meter-row">
+          <span class="meter-label">5h</span>
+          <span class="meter-num">–</span>
+          <span class="meter-of"></span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill"></div></div>
+      </button>
+      <button class="meter" id="meterWeek" title="Weekly limit">
+        <div class="meter-row">
+          <span class="meter-label">Week</span>
+          <span class="meter-num">–</span>
+          <span class="meter-of"></span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill"></div></div>
+      </button>
+    </div>
     <button class="complete" id="completeBtn" disabled title="Finish this session">✓ COMPLETE</button>
   </header>
 
@@ -136,6 +145,7 @@
   <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
   <script src="citron.js"></script>
   <script src="arm.js"></script>
+  <script src="chatview.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -8,6 +8,9 @@ const { execFile, execFileSync } = require('child_process');
 const pty = require('@lydell/node-pty');
 const { Usage } = require('./usage');
 const { ChatFeed } = require('./chat');
+const { describeTool } = require('./activity');
+const { questionKeys, KEY_GAP_MS } = require('./questions');
+const { parseLimits } = require('./statusline');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 const { MODELS, EFFORTS, DEFAULT_MODEL, DEFAULT_EFFORT } = require('./power');
 const { startRouter, LOCAL_MODEL, LOCAL_CONTEXT_TOKENS, OLLAMA } = require('./router');
@@ -39,6 +42,7 @@ const DEFAULTS = {
   sessionAgents: {}, // session id -> agent ids, so a resumed session gets its helpers back
   claudePath: null,
   setup: null, // Getting started choice: one of MODES in setup.js. null = not chosen yet
+  limits: null, // last 5h and weekly limits from the status line, so the bars show after a restart
 };
 let config = { ...DEFAULTS };
 try { config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) }; } catch { /* first run */ }
@@ -46,6 +50,21 @@ try { config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')
 if (!MODELS.includes(config.model)) config.model = DEFAULT_MODEL;
 if (!EFFORTS.includes(config.effort)) config.effort = DEFAULT_EFFORT;
 if (!setup.MODES.includes(config.setup)) config.setup = null;
+// Helpers get an icon for the chat, stored with the helper so it's the same everywhere.
+const HELPER_ICONS = ['🔎', '🛠️', '🧐', '🧪', '📚', '🎨', '🧭', '🦉', '🌿', '🎲'];
+function defaultIcon(key) {
+  const hash = [...String(key)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 0);
+  return HELPER_ICONS[hash % HELPER_ICONS.length];
+}
+for (const a of config.agents) if (!a.icon) a.icon = defaultIcon(a.key); // helpers from before icons existed
+const findHelper = (key) => config.agents.find((a) => a.key === key);
+const helperNameFor = (key) => (findHelper(key) ? findHelper(key).name : key || 'a helper');
+// The chat's name and icon for a helper run, from the agent type its transcript records. Null if it's not ours.
+function helperIdentity(agentType) {
+  const a = findHelper(agentType);
+  return a ? { key: a.key, name: a.name, icon: a.icon } : null;
+}
+let limits = config.limits; // { fiveHour: { percent, resetsAt }, week: { ... } }, see statusline.js
 const saveConfig = () => {
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
@@ -73,16 +92,18 @@ function nodeExe() {
 // Uses Node if installed, else Electron itself as Node (Claude Code runs hooks in Git Bash on Windows).
 function writeHookSettings() {
   const fwd = (p) => p.replace(/\\/g, '/');
-  const script = `"${fwd(path.join(__dirname, 'hook.js'))}"`;
   const node = process.env.LEMON_FORCE_ELECTRON_HOOK ? null : nodeExe();
-  const command = node ? `"${fwd(node)}" ${script}` : `ELECTRON_RUN_AS_NODE=1 "${fwd(process.execPath)}" ${script}`;
-  const h = [{ type: 'command', command, timeout: 5 }];
+  const scriptCommand = (file) => {
+    const script = `"${fwd(path.join(__dirname, file))}"`;
+    return node ? `"${fwd(node)}" ${script}` : `ELECTRON_RUN_AS_NODE=1 "${fwd(process.execPath)}" ${script}`;
+  };
+  const h = [{ type: 'command', command: scriptCommand('hook.js'), timeout: 5 }];
   const events = ['SessionStart', 'UserPromptSubmit', 'Stop', 'Notification', 'SessionEnd', 'SubagentStop'];
   const hooks = {};
   for (const e of events) hooks[e] = [{ hooks: h }];
   for (const e of ['PreToolUse', 'PostToolUse', 'PermissionRequest']) hooks[e] = [{ matcher: '*', hooks: h }];
   fs.mkdirSync(path.dirname(HOOKS_FILE), { recursive: true });
-  fs.writeFileSync(HOOKS_FILE, JSON.stringify({ hooks }, null, 2));
+  fs.writeFileSync(HOOKS_FILE, JSON.stringify({ hooks, statusLine: { type: 'command', command: scriptCommand('statusline.js') } }, null, 2));
 }
 
 const lastPing = new Map();
@@ -100,6 +121,7 @@ function startHookServer() {
         res.end('ok');
         let j;
         try { j = JSON.parse(body); } catch { return; }
+        if (req.url === '/limits') return updateLimits(j);
         const session = typeof j.session_id === 'string' ? j.session_id : null;
         const tabId = req.headers['x-lemon-tab'];
         const tab = tabs.get(tabId);
@@ -110,6 +132,8 @@ function startHookServer() {
           message: j.message, kind: j.notification_type, session: j.session_id, agentType: j.agent_type,
           toolUseId: j.tool_use_id,
         };
+        if (tab && ev.tool) ev.label = describeTool(ev.tool, ev.input, helperNameFor);
+        if (tab) trackQuestion(tab, ev);
         send('hook', ev);
         const wantsYou = ev.event === 'PermissionRequest'
           || (ev.event === 'Notification' && ev.kind !== 'idle_prompt');
@@ -118,6 +142,30 @@ function startHookServer() {
     });
     server.listen(0, '127.0.0.1', () => { hookPort = server.address().port; resolve(); });
   });
+}
+
+// The status line posts the session JSON here. A post may carry only one window: keep the other as it was.
+function updateLimits(statusLineJson) {
+  const posted = parseLimits(statusLineJson);
+  if (!posted) return;
+  limits = { ...limits, ...posted };
+  config.limits = limits;
+  saveConfig();
+  send('limits', limits);
+  send('usage', usageSummary());
+}
+
+// The question dialog is answered from the chat, so the questions as Claude asked them are kept until the
+// dialog closes: answered (PostToolUse), cancelled with Esc, or the turn moves on.
+function trackQuestion(tab, ev) {
+  if (ev.event === 'PreToolUse' && ev.tool === 'AskUserQuestion') {
+    const asked = ev.toolUseId && ev.input && Array.isArray(ev.input.questions);
+    tab.ask = asked ? { toolUseId: ev.toolUseId, questions: ev.input.questions, sent: false } : null;
+  } else if (ev.event === 'PostToolUse' && tab.ask && tab.ask.toolUseId === ev.toolUseId) {
+    tab.ask = null;
+  } else if (ev.event === 'Stop' || ev.event === 'UserPromptSubmit') {
+    tab.ask = null;
+  }
 }
 
 function rememberAgents(sessionId, ids) {
@@ -164,7 +212,7 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   args.push('--model', localOnly ? LOCAL_MODEL : config.model, '--effort', config.effort);
   if (config.mode && config.mode !== 'default') args.push('--permission-mode', config.mode);
   const helpers = config.agents.filter((a) => agentIds.includes(a.id));
-  if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers, localOnly)), '--append-system-prompt', helperHint(helpers));
+  if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers, localOnly)), '--append-system-prompt', helperHint(helpers, localOnly));
   if (resume) args.push('--resume', resume);
   if (prompt) args.push(prompt.replace(/\s*\n+\s*/g, ' '));
   // Local-only sessions go through their own router. Otherwise only sessions with a local helper use the router;
@@ -191,7 +239,7 @@ function agentsJson(helpers, localOnly) {
     else if (a.model && a.model !== 'inherit') def.model = a.model;
     if (a.effort && a.effort !== 'inherit') def.effort = a.effort;
     // Every tool definition is sent with each call. A local model has a 64K context, so it gets only what coding needs.
-    if (a.model === LOCAL_MODEL) def.tools = LOCAL_HELPER_TOOLS;
+    if (localOnly || a.model === LOCAL_MODEL) def.tools = LOCAL_HELPER_TOOLS;
     out[a.key] = def;
   }
   return out;
@@ -199,20 +247,26 @@ function agentsJson(helpers, localOnly) {
 
 const LOCAL_HELPER_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'];
 
-function helperHint(helpers) {
+// Ollama answers one call at a time and keeps one prompt cache, so local helpers running side by side queue
+// behind each other and each switch re-reads a 15-30K token prompt. Measured: calls took 30-90 s instead of ~2 s.
+function helperHint(helpers, localOnly) {
   const list = helpers.map((a) => `${a.key} (${a.role})`).join('; ');
+  const local = helpers.filter((a) => localOnly || a.model === LOCAL_MODEL).map((a) => a.key);
+  const pace = !local.length ? 'run independent jobs in parallel.'
+    : local.length === helpers.length ? 'give them one job at a time: they share one local GPU, so wait for each to finish before starting the next.'
+      : `run independent jobs in parallel, except on ${local.join(', ')}: local helpers share one GPU, so give them one job at a time.`;
   return `Helper agents are set up for this session: ${list}. Hand matching work to them with the Agent tool `
-    + 'instead of doing it all yourself, and run independent jobs in parallel.';
+    + `instead of doing it all yourself, and ${pace}`;
 }
 
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'helper';
 
 const STARTER_AGENTS = [
-  { name: 'Researcher', model: 'haiku', effort: 'low',
+  { name: 'Researcher', icon: '🔎', model: 'haiku', effort: 'low',
     role: 'Finds things: searches the code, reads files and docs, and reports back a short summary. Use it for any look-up or exploration.' },
-  { name: 'Coder', model: 'inherit', effort: 'high',
+  { name: 'Coder', icon: '🛠️', model: 'inherit', effort: 'high',
     role: 'Makes a well-defined code change, then checks that it builds or runs. Use it for implementation work.' },
-  { name: 'Reviewer', model: 'sonnet', effort: 'medium',
+  { name: 'Reviewer', icon: '🧐', model: 'sonnet', effort: 'medium',
     role: 'Reviews finished changes for bugs, missed edge cases and security problems, and lists what to fix. Use it before calling work done.' },
 ];
 
@@ -243,7 +297,7 @@ function followSession(tabId, sessionId) {
   if (tab.feed) tab.feed.stop();
   tab.sessionId = sessionId;
   tab.chat = [];
-  tab.feed = new ChatFeed(sessionId);
+  tab.feed = new ChatFeed(sessionId, helperIdentity);
   let first = true;
   tab.feed.on('messages', (messages) => {
     const start = tab.chat.length; // lets the page skip what it already got from chat:history
@@ -254,6 +308,19 @@ function followSession(tabId, sessionId) {
   tab.feed.start();
 }
 const SESSION_ID = /^[\w-]+$/;
+
+// Answers from the chat's question card are typed into the dialog as keypresses. A short gap between them, since
+// the dialog can read a quick burst as one input and skip the keys in it.
+function typeKeys(tabId, keys) {
+  let i = 0;
+  const next = () => {
+    const t = tabs.get(tabId);
+    if (!t || i >= keys.length) return;
+    t.pty.write(keys[i++]);
+    setTimeout(next, KEY_GAP_MS);
+  };
+  next();
+}
 
 // Text from the chat box goes in as a bracketed paste, so newlines stay newlines instead of sending early.
 // Enter follows a moment later as its own write, so it reads as "send" and not as part of the paste.
@@ -332,6 +399,16 @@ async function startProject(text, templateIds, agentIds) {
 // ---- app ------------------------------------------------------------------
 
 const usage = new Usage();
+const FIVE_HOUR_MS = 5 * 3600 * 1000;
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+
+// Token totals over the windows the status line reports: a window starts its length before it resets.
+function usageSummary() {
+  return usage.summary({
+    fiveHour: limits?.fiveHour ? limits.fiveHour.resetsAt - FIVE_HOUR_MS : null,
+    week: limits?.week ? limits.week.resetsAt - WEEK_MS : null,
+  });
+}
 
 function iconPath() {
   const p = path.join(ROOT, 'build', 'icon.png');
@@ -361,7 +438,8 @@ ipcMain.handle('app:init', () => ({
   models: MODELS,
   efforts: EFFORTS,
   sessions: usage.listSessions(),
-  usage: usage.summary(),
+  usage: usageSummary(),
+  limits,
   claude: claudeExe(),
   version: app.getVersion(),
 }));
@@ -434,7 +512,7 @@ ipcMain.handle('agents:save', (_e, a) => {
   while (config.agents.some((x) => x.key === key && x.id !== id)) key += '-2';
   const agent = {
     id, key, name, role: String(a.role || '').trim() || `Helps with ${name.toLowerCase()} work.`,
-    prompt: String(a.prompt || '').trim(),
+    prompt: String(a.prompt || '').trim(), icon: [...String(a.icon || '').trim()].slice(0, 2).join('') || defaultIcon(key),
     model: AGENT_MODELS.includes(a.model) ? a.model : 'inherit', effort: a.effort || 'inherit',
   };
   const i = config.agents.findIndex((x) => x.id === id);
@@ -462,7 +540,22 @@ ipcMain.handle('dialog:folder', async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
-ipcMain.on('pty:write', (_e, id, data) => { const t = tabs.get(id); if (t) t.pty.write(data); });
+ipcMain.on('pty:write', (_e, id, data) => {
+  const t = tabs.get(id);
+  if (!t) return;
+  if (data === '\x1b' && t.ask) t.ask = null; // Esc cancels the question dialog
+  t.pty.write(data);
+});
+// The chat's question card. The answers are checked against the questions Claude asked, then typed in.
+ipcMain.handle('ask:answer', (_e, { id, toolUseId, answers }) => {
+  const t = tabs.get(id);
+  if (!t || !t.ask || t.ask.toolUseId !== toolUseId || t.ask.sent) return { ok: false, error: 'That question is no longer waiting.' };
+  let keys;
+  try { keys = questionKeys(t.ask.questions, answers); } catch (err) { return { ok: false, error: err.message }; }
+  t.ask.sent = true;
+  typeKeys(id, keys);
+  return { ok: true };
+});
 ipcMain.on('chat:send', (_e, id, text) => sendChat(id, String(text || '')));
 // A resumed session's history is read before the page has made its tab, so the page asks for it.
 ipcMain.handle('chat:history', (_e, id) => { const t = tabs.get(id); return t && t.chat ? t.chat : []; });
@@ -505,7 +598,7 @@ app.whenReady().then(async () => {
   routerPort = (await startRouter()).address().port;
   localRouterPort = (await startRouter({ local: OLLAMA, remote: OLLAMA })).address().port;
   writeHookSettings();
-  usage.on('update', (s) => send('usage', s));
+  usage.on('update', () => send('usage', usageSummary()));
   usage.on('assistant-text', ({ session, text }) => {
     for (const [id, t] of tabs) if (t.sessionId === session) send('assistant-text', id, text);
   });

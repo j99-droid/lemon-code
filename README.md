@@ -40,6 +40,10 @@ Then pick **Local: GPT-OSS 20B** as a helper's model. Only sessions with a local
 is unchanged. The main Claude is always Claude. Ollama must be running when the helper is used (it runs in the
 tray after install). The model is about 13 GB and fits fully in 16 GB of GPU memory.
 
+Local helpers are told to work one job at a time. Ollama answers one call at a time with one prompt cache, so two
+local helpers side by side queue behind each other and keep re-reading their 15-30K token prompts: in testing on
+an RTX 4080 Super, calls took 30-90 s instead of about 2 s.
+
 **Local only** (the setup panel) runs every session on that model instead: no Claude account is used, and calls
 go to Ollama only. Claude Code is still needed as the program that runs the session. The model is smaller and
 weaker than Claude, and its context window is 64K, so long sessions lose their oldest messages.
@@ -57,18 +61,23 @@ weaker than Claude, and its context window is 64K, so long sessions lose their o
 - **Tabs**: ⌂ New project (home) first, then one tab per running session (dot = Citron's state for it, plus
   how many helpers are working). **⋯** opens **Agents** (make, edit, delete helpers; "Add starter team"),
   **Recent** (all Claude Code sessions to reopen or archive) and **Archived projects**.
-- **Chat view** (each session opens in it): only what you and Claude say, as chat bubbles. Tool calls, their
-  output and helper work are left out. Type in the box at the bottom: Enter sends, Shift+Enter is a new line, Esc
-  stops Claude, and pasting an image adds it to your next message. **Terminal** in the session header switches
-  to Claude's real terminal and back. The terminal opens by itself when Claude needs you there (an approval, a
-  question, sign-in or "trust this folder?") and goes back to chat once that's answered.
+- **Chat view** (each session opens in it): what you and Claude say, as chat bubbles, plus each helper as its own
+  member of a group chat: its icon, when it starts and finishes, what it is doing (reading, editing, running) and
+  what it says, live as it works. Claude's own tool calls and their output are left out. Type in the box at the
+  bottom: Enter sends, Shift+Enter is a new line, Esc stops Claude, and pasting an image adds it to your next
+  message. **Terminal** in the session header switches to Claude's real terminal and back.
+- **Question cards**: when Claude asks you something, the chat shows a card with each question's options (tick
+  boxes for pick-many questions, and "Type something" for your own answer). Option previews show as Markdown,
+  code, or live HTML in a sandboxed frame with no network. Send answer types your choices into Claude's dialog.
+  The terminal still opens by itself for approvals, sign-in and "trust this folder?", and goes back to chat after.
 - **Model / Effort / Mode**: for the main Claude, applied to sessions started after you change them. Model and
   Effort each have a slider (lists in `src/power.js`). The arm beside them grows with both: a weak arm for Haiku
   at low effort, a huge arm with fire for Fable at max.
-- **Meter**: today's tokens against a daily budget (your 14-day average until you set one), the 5-hour window
-  reset time, 7-day average, today's projection and a 7-day chart. Counts every Claude Code session, desktop
-  app included. Local-model calls (see Local helpers) have their own today total and 5-hour window, shown under
-  the Claude numbers and left out of them. Click it for details and to set the budget.
+- **5h and Week bars**: your Claude plan's 5-hour and weekly limits as a percent, with reset times, as Claude
+  Code reports them to its status line (Pro/Max plans, after the first reply; the last values are kept across
+  restarts). Click a bar for that window's tokens, sessions, cache reads and a per-model breakdown. Those token
+  totals come from this PC's transcripts, so they won't add up to the percent, which also counts claude.ai and
+  other computers. Local-model calls are shown separately and left out. Hidden in Local only.
 - **COMPLETE**: asks "Is that all?", offers a commit if there are changes (never pushes), closes the session and
   moves it to Archived projects. If git has no name/email yet it asks once and saves them globally.
 - **Citron**: reacts to hooks from sessions started here: thinking, typing, coding (with what it's doing),
@@ -79,9 +88,15 @@ weaker than Claude, and its context window is 64K, so long sessions lose their o
 | File | What it does |
 |---|---|
 | `src/main.js` | Window, Claude terminals (node-pty), chat feeds, hook listener, git, project creation |
-| `src/usage.js` | Reads transcripts for token totals, 5h window and the session list |
-| `src/chat.js` | Follows one session's transcript and picks out the chat messages for the chat view |
+| `src/usage.js` | Reads transcripts for token totals per limit window and the session list |
+| `test/usage.test.js` | Tests for the usage totals (`npm test`) |
+| `src/statusline.js` | Claude Code status line command: passes the 5h and weekly limits to the app |
+| `test/statusline.test.js` | Tests for reading the limits (`npm test`) |
+| `src/chat.js` | Follows one session's transcript and its helpers' transcripts for the chat view |
 | `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
+| `src/activity.js` | Short labels for tool calls ("Editing notes.md"), for Citron and helper bubbles |
+| `src/questions.js` | Turns a question card's answers into the keys Claude's question dialog reads |
+| `test/questions.test.js` | Tests for those keys (`npm test`) |
 | `src/router.js` | Local model router: sends a local helper's calls to Ollama, the rest to Anthropic |
 | `test/router.test.js` | Tests for where the router sends each call (`npm test`) |
 | `tools/local-model/Modelfile` | Makes the `lemon-gpt-oss-20b` model with a 64K context (see Local helpers) |
@@ -96,6 +111,8 @@ weaker than Claude, and its context window is 64K, so long sessions lose their o
 | `LICENSE` | MIT |
 | `src/preload.js` | Safe bridge between page and main process |
 | `src/renderer/` | The page: `index.html`, `styles.css`, `app.js`, `citron.js` (the sprite) |
+| `src/renderer/chatview.js` | Draws chat bubbles, helper bubbles and question cards (Markdown, previews) |
+| `src/renderer/preview-frame.html` | Holds one HTML preview from a question card, sandboxed with no network |
 | `preview/citron-preview.html` | Sprite sheet of every pose (serve the folder over http to view) |
 | `tools/make-icon.js` | Redraws `build/icon.png` / `icon.ico` from Citron |
 | `tools/make-shortcut.ps1` | Makes the Desktop shortcut |
