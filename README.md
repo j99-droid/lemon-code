@@ -42,7 +42,9 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
   stops Claude, and pasting an image adds it to your next message. **Terminal** in the session header switches
   to Claude's real terminal and back. The terminal opens by itself when Claude needs you there (an approval, a
   question, sign-in or "trust this folder?") and goes back to chat once that's answered.
-- **Model / Effort / Mode**: for the main Claude, applied to sessions started after you change them.
+- **Model / Effort / Mode**: for the main Claude, applied to sessions started after you change them. Model and
+  Effort each have a slider (lists in `src/power.js`). The arm beside them grows with both: a weak arm for Haiku
+  at low effort, a huge arm with fire for Fable at max.
 - **Meter**: today's tokens against a daily budget (your 14-day average until you set one), the 5-hour window
   reset time, 7-day average, today's projection and a 7-day chart. Counts every Claude Code session, desktop
   app included. Click it for details and to set the budget.
@@ -61,6 +63,8 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
 | `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |
 | `src/templates.js` | Folder naming, prompt building, AGENTS.md skeleton |
+| `src/power.js` | The model and effort slider lists, in slider order, and the defaults |
+| `src/renderer/arm.js` | Draws the flexed arm on the Power slider (SVG in code, fire at the top step) |
 | `AGENTS.md` / `CLAUDE.md` | Rules for AI agents working on this repo (`CLAUDE.md` just loads `AGENTS.md`) |
 | `.githooks/pre-commit` | Blocks committing secrets, databases and logs (enabled by the `core.hooksPath` line above) |
 | `LICENSE` | MIT |
@@ -72,7 +76,7 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
 | `templates/githooks/pre-commit` | Secrets hook copied into new projects |
 
 ## Settings
-Stored in `%APPDATA%\lemoncode\config.json`: daily budget, archived sessions, model, mode, `projectsRoot`
+Stored in `%APPDATA%\lemoncode\config.json`: daily budget, archived sessions, model, effort, mode, `projectsRoot`
 (default `~\Lemon Projects`), your templates and agents, which helpers each session had, and an optional
 `claudePath`.
 

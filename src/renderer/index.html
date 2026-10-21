@@ -13,26 +13,16 @@
   <header class="topbar">
     <div class="brand"><canvas id="brandCitron"></canvas><span>LemonCode</span></div>
     <div class="pickers">
-      <label class="pill" title="Main Claude's model (new sessions)">
+      <span class="power-arm" id="powerArm" title="How strong the main Claude is, from both sliders"></span>
+      <label class="pill power-pill" id="modelLabel" title="Main Claude's model (new sessions)">
         <span class="pill-label">Model</span>
-        <select id="modelPick">
-          <option value="default">Default</option>
-          <option value="fable">Fable</option>
-          <option value="opus">Opus</option>
-          <option value="sonnet">Sonnet</option>
-          <option value="haiku">Haiku</option>
-        </select>
+        <input type="range" id="modelPick" min="0" max="3" step="1" aria-label="Model for new sessions">
+        <span class="power-name" id="modelName"></span>
       </label>
-      <label class="pill" title="Main Claude's effort (new sessions)">
+      <label class="pill power-pill" id="effortLabel" title="Main Claude's effort (new sessions)">
         <span class="pill-label">Effort</span>
-        <select id="effortPick">
-          <option value="default">Default</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="xhigh">Extra high</option>
-          <option value="max">Max</option>
-        </select>
+        <input type="range" id="effortPick" min="0" max="4" step="1" aria-label="Effort for new sessions">
+        <span class="power-name" id="effortName"></span>
       </label>
       <label class="pill" title="Permission mode (new sessions)">
         <span class="pill-label">Mode</span>
@@ -147,6 +137,7 @@
   <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
   <script src="citron.js"></script>
+  <script src="arm.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

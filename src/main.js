@@ -9,6 +9,7 @@ const pty = require('@lydell/node-pty');
 const { Usage } = require('./usage');
 const { ChatFeed } = require('./chat');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
+const { MODELS, EFFORTS, DEFAULT_MODEL, DEFAULT_EFFORT } = require('./power');
 
 const ROOT = path.join(__dirname, '..');
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
@@ -26,8 +27,8 @@ if (!fs.existsSync(CONFIG_FILE) && fs.existsSync(OLD_CONFIG_FILE)) {
 const DEFAULTS = {
   dailyBudget: null, // null = use your 14-day average
   archived: [],
-  model: 'default',
-  effort: 'default',
+  model: DEFAULT_MODEL, // one of MODELS (power.js)
+  effort: DEFAULT_EFFORT, // one of EFFORTS (power.js)
   mode: 'default',
   projectsRoot: path.join(os.homedir(), 'Lemon Projects'),
   templates: [], // user-made, see templates.js
@@ -38,6 +39,9 @@ const DEFAULTS = {
 };
 let config = { ...DEFAULTS };
 try { config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) }; } catch { /* first run */ }
+// Configs from before the sliders stored "default" (no flag was passed). Those become the slider defaults.
+if (!MODELS.includes(config.model)) config.model = DEFAULT_MODEL;
+if (!EFFORTS.includes(config.effort)) config.effort = DEFAULT_EFFORT;
 const saveConfig = () => {
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
@@ -150,8 +154,7 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   const exe = claudeExe();
   if (!exe) throw new Error("Claude Code isn't installed yet. Use the Install button on the home page.");
   const args = ['--settings', HOOKS_FILE];
-  if (config.model && config.model !== 'default') args.push('--model', config.model);
-  if (config.effort && config.effort !== 'default') args.push('--effort', config.effort);
+  args.push('--model', config.model, '--effort', config.effort);
   if (config.mode && config.mode !== 'default') args.push('--permission-mode', config.mode);
   const helpers = config.agents.filter((a) => agentIds.includes(a.id));
   if (helpers.length) args.push('--agents', JSON.stringify(agentsJson(helpers)), '--append-system-prompt', helperHint(helpers));
@@ -335,6 +338,8 @@ function createWindow() {
 
 ipcMain.handle('app:init', () => ({
   config,
+  models: MODELS,
+  efforts: EFFORTS,
   sessions: usage.listSessions(),
   usage: usage.summary(),
   claude: claudeExe(),
