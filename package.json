@@ -1,6 +1,6 @@
 {
   "name": "lemoncode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A friendlier desktop frame around Claude Code, with Citron the lemon, a token meter and project templates.",
   "main": "src/main.js",
   "private": true,

@@ -7,6 +7,7 @@
   let config = boot.config;
   let usage = boot.usage;
   let sessions = boot.sessions;
+  $('stripVersion').textContent = `v${boot.version}`;
 
   // ---- helpers -------------------------------------------------------------
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -21,7 +22,11 @@
   };
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
-  const MODEL_NAMES = { inherit: 'Same as main', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
+  // The local one runs on this PC through Ollama (see src/router.js); the name must match LOCAL_MODEL there.
+  const MODEL_NAMES = {
+    inherit: 'Same as main', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku',
+    'lemon-qwen3-coder': 'Local: Qwen3 Coder',
+  };
   const EFFORT_NAMES = { inherit: 'Same as main', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
 
   // ---- Citron --------------------------------------------------------------
@@ -169,6 +174,7 @@
   function goPage(v) {
     view = v;
     show(null);
+    if (v === 'home') refreshSetup();
     ({ home: renderHome, agents: renderAgents, recent: renderRecent, archive: renderArchive })[v]();
   }
   const goHome = () => goPage('home');
@@ -323,8 +329,14 @@
   $('tabs').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) show(b.dataset.id); };
   $('homeTab').onclick = () => { picked.clear(); goHome(); askBox.focus(); };
   $('menuBtn').onclick = (e) => { e.stopPropagation(); $('menu').hidden = !$('menu').hidden; };
-  $('menu').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { $('menu').hidden = true; goPage(b.dataset.view); } };
+  $('menu').onclick = (e) => {
+    if (e.target.closest('[data-setup]')) { $('menu').hidden = true; setupOpen = true; return goHome(); }
+    const b = e.target.closest('[data-view]');
+    if (b) { $('menu').hidden = true; goPage(b.dataset.view); }
+  };
   document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) $('menu').hidden = true; });
+  // Finishing an install in a terminal tab, then coming back, should show the new state.
+  window.addEventListener('focus', () => { if (!active && view === 'home') refreshSetup(); });
 
   // ---- mood machine --------------------------------------------------------
   // States per tab; Citron shows the active tab, unless another tab needs you.
@@ -490,8 +502,80 @@
   const pickedAgents = new Set(config.lastAgents.filter((id) => config.agents.some((a) => a.id === id)));
   const askBox = $('askBox');
 
+  // ---- getting started: which setup, and what it still needs -----------------
+  // Opens on the first start and whenever the chosen setup isn't ready. Close hides it until the next start,
+  // and the menu's Getting started brings it back.
+  const SETUP_MODES = [
+    { id: 'claude', name: 'Claude account', text: 'Sign in with your Claude plan. Everything runs on Claude.' },
+    { id: 'local-helpers', name: 'Claude + local helpers', text: 'Claude as usual, and helpers that run a model on this PC through Ollama.' },
+    { id: 'local', name: 'Local only', text: 'Every session runs on a model on this PC through Ollama. No Claude account.' },
+  ];
+  let setupMode = config.setup;
+  // The main model is fixed in local-only mode, so the Model slider has nothing to choose.
+  $('modelLabel').hidden = setupMode === 'local';
+  let setupStatus = null; // from setup:status: { claude, ollama: { installed, running, modelReady }, ready }
+  let setupOpen = false;
+  let setupChecked = false;
+
+  const stepRow = (done, title, note, action) => `<div class="step ${done ? 'done' : ''}"><span class="tick"></span>`
+    + `<div class="step-text"><strong>${esc(title)}</strong><span>${esc(note)}</span></div>`
+    + `<div class="step-action">${done ? '' : action}</div></div>`;
+  function setupSteps() {
+    const s = setupStatus, o = s.ollama;
+    const claudeNote = setupMode === 'local' ? 'The program only. No Claude account is used.'
+      : 'Sign in with your Claude account the first time a project starts.';
+    const claude = stepRow(s.claude, 'Claude Code', claudeNote,
+      '<button class="btn primary" data-do="claude">Install Claude Code</button>');
+    if (setupMode === 'claude') return claude;
+    const ollamaNote = o.installed && o.running ? 'Running.'
+      : o.installed ? 'Installed, but not running. Start Ollama from the Start menu.'
+        : 'Runs the helper models on this PC. Free, and nothing leaves the PC.';
+    const ollamaAction = o.installed ? ''
+      : '<button class="btn primary" data-do="ollama">Install Ollama</button><button class="linkish" data-do="ollama-page">Download page</button>';
+    const ollama = stepRow(o.installed && o.running, 'Ollama', ollamaNote, ollamaAction);
+    const model = stepRow(o.modelReady, 'Qwen3 Coder model', 'About 19 GB, downloaded once.',
+      `<button class="btn primary" data-do="model" ${o.running ? '' : 'disabled'}>Download model</button>`);
+    return claude + ollama + model;
+  }
+  function renderSetup() {
+    const card = $('setupCard');
+    card.hidden = !setupOpen || !setupStatus;
+    if (card.hidden) return;
+    const modes = SETUP_MODES.map((m) => `<button class="mode ${m.id === setupMode ? 'on' : ''}" data-mode="${m.id}">`
+      + `<strong>${esc(m.name)}</strong><small>${esc(m.text)}</small></button>`).join('');
+    card.innerHTML = '<h2>Getting started</h2>'
+      + '<p>How should your Claude run? You can change this later under ⋯ → Getting started.</p>'
+      + `<div class="modes">${modes}</div>`
+      + `<div class="steps">${setupMode ? setupSteps() : '<span class="hint">Pick one to see what it needs.</span>'}</div>`
+      + '<div class="setup-foot">'
+      + `<span class="hint">${setupStatus.ready ? 'All set.' : ''}</span>`
+      + '<button class="btn" data-do="check">Check again</button>'
+      + `<button class="btn" data-do="close">${setupStatus.ready ? 'Close' : 'Later'}</button></div>`;
+  }
+  async function refreshSetup() {
+    setupStatus = await api.setupStatus(setupMode);
+    if (!setupChecked) { setupChecked = true; setupOpen = !setupStatus.ready; }
+    renderSetup();
+  }
+  $('setupCard').onclick = async (e) => {
+    const pick = e.target.closest('[data-mode]');
+    if (pick) {
+      setupMode = await api.chooseSetup(pick.dataset.mode);
+      $('modelLabel').hidden = setupMode === 'local';
+      return refreshSetup();
+    }
+    const b = e.target.closest('[data-do]');
+    if (!b) return;
+    const what = b.dataset.do;
+    if (what === 'close') { setupOpen = false; return renderSetup(); }
+    if (what === 'check') return refreshSetup();
+    if (what === 'ollama-page') return api.openOllamaPage();
+    const run = { claude: () => api.installClaude(), ollama: () => api.installOllama(), model: () => api.pullModel() }[what];
+    launch(run());
+  };
+
   function renderHome() {
-    $('setupCard').hidden = !!boot.claude;
+    renderSetup();
     const tpl = config.templates;
     const card = (t) => `<button class="card ${picked.has(t.id) ? 'on' : ''}" data-k="${t.id}"><span class="tick"></span>`
       + `<span class="big">${esc(t.icon || '✨')}</span><strong>${esc(t.name)}</strong>`
@@ -553,7 +637,6 @@
   askBox.oninput = fitAsk;
   askBox.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); startProject(); } };
   $('askGo').onclick = startProject;
-  $('installBtn').onclick = () => launch(api.installClaude());
 
   // ---- agents page -----------------------------------------------------------
   function renderAgents() {
@@ -681,6 +764,7 @@
     $('meterPop').innerHTML = `
       <div class="pop-big">${fmt(u.today.main)}<small>${b ? `of ${fmt(b)} today` : 'today'}</small></div>
       <div class="pop-sub">+ ${fmt(u.today.cacheRead)} cache reads (cheap, not counted) · in ${fmt(u.today.input)} · out ${fmt(u.today.output)} · cache writes ${fmt(u.today.cacheWrite)}</div>
+      <div class="pop-sub">Local model (Qwen3 Coder, this PC): ${fmt(u.localToday.main)} today · 5h window ${u.localWindow ? `${fmt(u.localWindow.main)}, resets in ${until(u.localWindow.end)}` : 'not started'}. Kept out of the numbers above.</div>
       <div class="pop-grid">
         <div class="pop-stat"><b>${w ? until(w.end) : '–'}</b><span>${w ? `until the 5h window resets · ${fmt(w.main)} used` : '5h window not started'}</span></div>
         <div class="pop-stat"><b style="color:${projColour}">${fmt(u.projection)}</b><span>today at this pace</span></div>
@@ -691,7 +775,7 @@
         ${b ? `<div class="budget-line" style="bottom:${(b / max) * 100}%"></div>` : ''}</div>
       <div class="bar-labels">${days.map((d) => `<span>${d.day === 'today' ? 'today' : new Date(d.day + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' })}</span>`).join('')}</div>
       <div class="pop-budget"><input id="budgetInput" type="text" placeholder="Daily budget, e.g. 2M or 1500k" value="${config.dailyBudget ? fmt(config.dailyBudget) : ''}"><button class="btn primary" id="budgetSave">Save</button></div>
-      <div class="pop-note">${config.dailyBudget ? 'Clear the box to go back to your 14-day average.' : `Using your 14-day average (${fmt(u.avg14active)}) until you set one.`} Counts input + output + cache writes across all Claude Code sessions (helpers included), desktop app too.</div>`;
+      <div class="pop-note">${config.dailyBudget ? 'Clear the box to go back to your 14-day average.' : `Using your 14-day average (${fmt(u.avg14active)}) until you set one.`} Counts input + output + cache writes across all Claude Code sessions (helpers included), desktop app too. Local-model calls are not counted.</div>`;
     $('budgetSave').onclick = saveBudget;
     $('budgetInput').onkeydown = (e) => { if (e.key === 'Enter') saveBudget(); };
   }

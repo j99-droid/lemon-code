@@ -19,6 +19,10 @@ project templates. How it works and the file map: README.md.
   the ones started here, would send events to Citron.
 - `src/hook.js` must print nothing (UserPromptSubmit output goes into Claude's context) and always exit 0.
 - The PTY is `@lydell/node-pty` because it ships Windows prebuilds (plain `node-pty` needs Visual Studio).
+- A subagent can't pick its own API server, so a helper on a local model goes through `src/router.js`, which
+  `ANTHROPIC_BASE_URL` points at. Only sessions with a local helper get that variable; keep it that way, since the
+  router sees every call. The name `lemon-qwen3-coder` is in three places (`src/router.js`, the Modelfile, and
+  the helper list in `src/renderer/app.js`): change them together.
 - The meter's main number is input + output + cache writes; cache reads are shown but not counted. Messages are
   deduped by message id + request id (Claude Code writes one line per content block).
 - Citron is drawn in code (`src/renderer/citron.js`), not image files. `npm run icon` redraws the app icon from it.
@@ -42,6 +46,16 @@ project templates. How it works and the file map: README.md.
   ("Waiting for helpers…") until each started helper's `SubagentStop` (`agent_type`) arrives. `SubagentStop`
   also fires for internal subagents with no `agent_type`, and `SubagentHandback` / `SendFeedback` are internal
   tools: ignore them.
+- Getting started's Ollama row is done only when Ollama is both installed and running: a server can answer on
+  port 11434 from somewhere else, so "running" alone says nothing about the program.
+- Getting started's model step runs Ollama by its full install path: a terminal opened after the winget install
+  still has the old PATH.
+- Local only runs every session on the local model. Claude Code's model names are mapped to it in
+  `setup.js` (`localOnlyEnv`), helpers are forced to it, and a second router sends all calls to Ollama. Any new
+  model name that Claude Code gets needs a mapping there too, or Ollama answers "model not found".
+- Local only: Claude Code warns that the local model is unrecognized and assumes a 200k window, while the
+  Modelfile sets 32K. `CLAUDE_CODE_AUTO_COMPACT_WINDOW` can't fix that (it has a 100k minimum), so a long session
+  loses its oldest context in Ollama without warning.
 - Shift+Enter is sent as ESC+CR, which Claude Code treats as a newline.
 - Ctrl+V pastes text itself; with no text on the clipboard it sends a raw Ctrl+V so Claude can grab an image.
 - The data folder follows package.json's `name`. It was `%APPDATA%\lemon-code` before the LemonCode rename;

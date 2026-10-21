@@ -17,12 +17,32 @@ npm start
 ```
 Or double-click **LemonCode** on the Desktop (`npm run shortcut` makes it).
 
-LemonCode runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. If Claude Code
-isn't installed, the home page has an Install button, which runs Anthropic's official installer
-(`irm https://claude.ai/install.ps1 | iex`). The first session asks you to sign in with your Claude account.
+LemonCode runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. The first start
+opens **Getting started** on the home page. Pick one of three setups: **Claude account** (everything on Claude),
+**Claude + local helpers** (Claude as usual, helpers on a model here), or **Local only** (every session on a model
+here, no Claude account; see below). It checks Claude Code and Ollama and offers an Install button for each one
+that's missing. Claude Code's button runs Anthropic's official installer (`irm https://claude.ai/install.ps1 | iex`),
+and the first session of a Claude setup asks you to sign in with your Claude account. Reopen the panel any time from
+⋯ → Getting started.
 
 Citron's reactions come from a small hook server that LemonCode starts on `127.0.0.1` (a random local port). Only
 sessions LemonCode starts are sent to it, but it has no password, so other programs on your PC could post to it.
+
+## Local helpers (optional)
+A helper can run on a model on your PC instead of Claude. It needs [Ollama](https://ollama.com) (0.14 or newer) and
+the Qwen3 Coder model. Getting started installs Ollama with winget and downloads the model for you, or do it by hand:
+```
+ollama pull qwen3-coder:30b
+ollama create lemon-qwen3-coder -f tools/local-model/Modelfile
+```
+Then pick **Local: Qwen3 Coder** as a helper's model. Only sessions with a local helper use the local router
+(`src/router.js`): it sends that helper's calls to Ollama and everything else to Anthropic, so your Claude sign-in
+is unchanged. The main Claude is always Claude. Ollama must be running when the helper is used (it runs in the
+tray after install). The model needs about 19 GB of disk and runs best with 16 GB of GPU memory or more.
+
+**Local only** (the setup panel) runs every session on that model instead: no Claude account is used, and calls
+go to Ollama only. Claude Code is still needed as the program that runs the session. The model is smaller and
+weaker than Claude, and its context window is 32K, so long sessions lose their oldest messages.
 
 ## What's on screen
 - **Type box** (home page): type what you want, press Enter. With **Blank** picked, LemonCode makes a folder in
@@ -47,7 +67,8 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
   at low effort, a huge arm with fire for Fable at max.
 - **Meter**: today's tokens against a daily budget (your 14-day average until you set one), the 5-hour window
   reset time, 7-day average, today's projection and a 7-day chart. Counts every Claude Code session, desktop
-  app included. Click it for details and to set the budget.
+  app included. Local-model calls (see Local helpers) have their own today total and 5-hour window, shown under
+  the Claude numbers and left out of them. Click it for details and to set the budget.
 - **COMPLETE**: asks "Is that all?", offers a commit if there are changes (never pushes), closes the session and
   moves it to Archived projects. If git has no name/email yet it asks once and saves them globally.
 - **Citron**: reacts to hooks from sessions started here: thinking, typing, coding (with what it's doing),
@@ -61,6 +82,11 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
 | `src/usage.js` | Reads transcripts for token totals, 5h window and the session list |
 | `src/chat.js` | Follows one session's transcript and picks out the chat messages for the chat view |
 | `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
+| `src/router.js` | Local model router: sends a local helper's calls to Ollama, the rest to Anthropic |
+| `test/router.test.js` | Tests for where the router sends each call (`npm test`) |
+| `src/setup.js` | Getting started checks: Claude Code, Ollama and the local model, and the install and pull commands |
+| `test/setup.test.js` | Tests for what counts as ready and how Ollama's answer is read (`npm test`) |
+| `tools/local-model/Modelfile` | Makes the `lemon-qwen3-coder` model with a 32K context (see Local helpers) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |
 | `src/templates.js` | Folder naming, prompt building, AGENTS.md skeleton |
 | `src/power.js` | The model and effort slider lists, in slider order, and the defaults |

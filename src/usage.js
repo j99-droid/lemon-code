@@ -1,9 +1,11 @@
 // Reads Claude Code's transcripts (~/.claude/projects/**/*.jsonl) for token usage and the session list.
 // Every Claude Code session writes here, including the desktop app's, so the meter sees all usage.
+// Calls to the local model (router.js) run on this PC, so they are counted apart from the Claude numbers.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { EventEmitter } = require('events');
+const { LOCAL_MODEL } = require('./router');
 
 const PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const KEEP_DAYS = 15;
@@ -12,6 +14,16 @@ const DAY_MS = 24 * 3600 * 1000;
 
 const dayKey = (t) => new Date(t).toLocaleDateString('en-CA'); // YYYY-MM-DD, local time
 const floorHour = (t) => { const d = new Date(t); d.setMinutes(0, 0, 0); return d.getTime(); };
+
+// Pro limits run in 5-hour windows that start with the first message after the last one ended.
+// Returns null when no window is open now. Entries must be sorted by time.
+function fiveHourWindow(entries, now) {
+  let start = null;
+  for (const e of entries) if (start === null || e.ts >= start + WINDOW_MS) start = floorHour(e.ts);
+  if (start === null || now >= start + WINDOW_MS) return null;
+  const main = entries.filter((e) => e.ts >= start).reduce((s, e) => s + e.input + e.output + e.cacheWrite, 0);
+  return { start, end: start + WINDOW_MS, main };
+}
 
 class Usage extends EventEmitter {
   constructor() {
@@ -83,6 +95,7 @@ class Usage extends EventEmitter {
     const entry = {
       ts: Date.parse(j.timestamp),
       session: j.sessionId,
+      local: m.model === LOCAL_MODEL,
       input: u.input_tokens || 0,
       output: u.output_tokens || 0,
       cacheWrite: u.cache_creation_input_tokens || 0,
@@ -109,11 +122,18 @@ class Usage extends EventEmitter {
     const sessions = {};
     const entries = [...this.messages.values()].sort((a, b) => a.ts - b.ts);
     const zero = () => ({ main: 0, cacheRead: 0, input: 0, output: 0, cacheWrite: 0 });
-    for (const e of entries) {
-      const d = days[dayKey(e.ts)] || (days[dayKey(e.ts)] = zero());
-      const main = e.input + e.output + e.cacheWrite;
-      d.main += main; d.cacheRead += e.cacheRead; d.input += e.input; d.output += e.output; d.cacheWrite += e.cacheWrite;
-      if (e.session) sessions[e.session] = (sessions[e.session] || 0) + main;
+    const add = (d, e) => {
+      d.main += e.input + e.output + e.cacheWrite;
+      d.cacheRead += e.cacheRead; d.input += e.input; d.output += e.output; d.cacheWrite += e.cacheWrite;
+    };
+    const claude = entries.filter((e) => !e.local);
+    const local = entries.filter((e) => e.local);
+    const localToday = zero();
+    for (const e of entries) if (e.local && dayKey(e.ts) === today) add(localToday, e);
+    for (const e of claude) {
+      const k = dayKey(e.ts);
+      add(days[k] || (days[k] = zero()), e);
+      if (e.session) sessions[e.session] = (sessions[e.session] || 0) + e.input + e.output + e.cacheWrite;
     }
 
     // Past days, newest first, today excluded.
@@ -126,20 +146,16 @@ class Usage extends EventEmitter {
     const active14 = past.filter((d) => d.main > 0);
     const avg14active = active14.length ? active14.reduce((s, d) => s + d.main, 0) / active14.length : 0;
 
-    // Pro limits run in 5-hour windows that start with the first message after the last one ended.
-    let start = null;
-    for (const e of entries) if (start === null || e.ts >= start + WINDOW_MS) start = floorHour(e.ts);
-    let win = null;
-    if (start !== null && now < start + WINDOW_MS) {
-      const main = entries.filter((e) => e.ts >= start).reduce((s, e) => s + e.input + e.output + e.cacheWrite, 0);
-      win = { start, end: start + WINDOW_MS, main };
-    }
+    const win = fiveHourWindow(claude, now);
+    const localWindow = fiveHourWindow(local, now);
 
     const t = days[today] || zero();
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
     const hours = Math.max(1, (now - midnight.getTime()) / 3600000);
     return {
       today: t,
+      localToday,
+      localWindow,
       projection: Math.round((t.main / hours) * 24),
       avg7: Math.round(avg7),
       avg14active: Math.round(avg14active),
