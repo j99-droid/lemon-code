@@ -1,4 +1,4 @@
-# Lemon Code 🍋
+# LemonCode 🍋
 
 A friendlier window around Claude Code: type what you want and press Enter, your own templates, a live token
 meter, a one-click COMPLETE button, and Citron, a pixel lemon who shows what Claude is doing.
@@ -9,23 +9,23 @@ Windows 10 or 11 (the app uses `claude.exe`, PowerShell and a Desktop shortcut, 
 
 ## Start
 ```
-git clone https://github.com/j99-droid/lemon-code.git
-cd lemon-code
+git clone https://github.com/j99-droid/lemoncode.git
+cd lemoncode
 git config core.hooksPath .githooks
 npm install
 npm start
 ```
-Or double-click **Lemon Code** on the Desktop (`npm run shortcut` makes it).
+Or double-click **LemonCode** on the Desktop (`npm run shortcut` makes it).
 
-Lemon Code runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. If Claude Code
+LemonCode runs Anthropic's **Claude Code** CLI in a window, so you need a Claude plan or account. If Claude Code
 isn't installed, the home page has an Install button, which runs Anthropic's official installer
 (`irm https://claude.ai/install.ps1 | iex`). The first session asks you to sign in with your Claude account.
 
-Citron's reactions come from a small hook server that Lemon Code starts on `127.0.0.1` (a random local port). Only
-sessions Lemon Code starts are sent to it, but it has no password, so other programs on your PC could post to it.
+Citron's reactions come from a small hook server that LemonCode starts on `127.0.0.1` (a random local port). Only
+sessions LemonCode starts are sent to it, but it has no password, so other programs on your PC could post to it.
 
 ## What's on screen
-- **Type box** (home page): type what you want, press Enter. With **Blank** picked, Lemon Code makes a folder in
+- **Type box** (home page): type what you want, press Enter. With **Blank** picked, LemonCode makes a folder in
   the projects folder (default `~\Lemon Projects`) named from your words, with git, AGENTS.md, CLAUDE.md
   (`@AGENTS.md`), `.gitignore` and the secrets pre-commit hook, marks it trusted in `~/.claude.json` (backup in
   `~/.claude.json.lemon-backup`) and starts Claude with your words as the first prompt.
@@ -65,7 +65,7 @@ sessions Lemon Code starts are sent to it, but it has no password, so other prog
 | `templates/githooks/pre-commit` | Secrets hook copied into new projects |
 
 ## Settings
-Stored in `%APPDATA%\lemon-code\config.json`: daily budget, archived sessions, model, mode, `projectsRoot`
+Stored in `%APPDATA%\lemoncode\config.json`: daily budget, archived sessions, model, mode, `projectsRoot`
 (default `~\Lemon Projects`), your templates and agents, which helpers each session had, and an optional
 `claudePath`.
 

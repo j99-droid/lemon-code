@@ -1,4 +1,4 @@
-// Lemon Code renderer: tabs, pages (home, agents, recent, archived), terminals, token meter, Citron, modals.
+// LemonCode renderer: tabs, pages (home, agents, recent, archived), terminals, token meter, Citron, modals.
 (async function () {
   'use strict';
   const $ = (id) => document.getElementById(id);

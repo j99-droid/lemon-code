@@ -1,4 +1,4 @@
-// Claude Code hook command: forwards the hook's JSON (stdin) to Lemon Code so Citron can react.
+// Claude Code hook command: forwards the hook's JSON (stdin) to LemonCode so Citron can react.
 // Runs under Electron-as-Node (ELECTRON_RUN_AS_NODE=1). Prints nothing: UserPromptSubmit output
 // would be added to Claude's context. Always exits 0 so it can never block Claude.
 const http = require('http');
