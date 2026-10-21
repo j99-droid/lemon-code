@@ -1,4 +1,4 @@
-// LemonCode main process: window, Claude Code terminals (node-pty), hook listener, usage meter, git.
+// LemonCode main process: window, Claude Code terminals (node-pty), chat feeds, hook listener, usage meter, git.
 const { app, BrowserWindow, ipcMain, Notification, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -7,6 +7,7 @@ const http = require('http');
 const { execFile, execFileSync } = require('child_process');
 const pty = require('@lydell/node-pty');
 const { Usage } = require('./usage');
+const { ChatFeed } = require('./chat');
 const { buildPrompt, folderName, AGENTS_SKELETON } = require('./templates');
 
 const ROOT = path.join(__dirname, '..');
@@ -92,11 +93,12 @@ function startHookServer() {
         const session = typeof j.session_id === 'string' ? j.session_id : null;
         const tabId = req.headers['x-lemon-tab'];
         const tab = tabs.get(tabId);
-        if (tab && session) tab.sessionId = session;
+        if (tab && session) followSession(tabId, session);
         if (tab && session && j.hook_event_name === 'SessionStart' && tab.agentIds && tab.agentIds.length) rememberAgents(session, tab.agentIds);
         const ev = {
           tab: tabId, event: j.hook_event_name, tool: j.tool_name, input: j.tool_input,
           message: j.message, kind: j.notification_type, session: j.session_id, agentType: j.agent_type,
+          toolUseId: j.tool_use_id,
         };
         send('hook', ev);
         const wantsYou = ev.event === 'PermissionRequest'
@@ -130,7 +132,7 @@ function pingUser(tabId, ev) {
 
 // ---- terminals ------------------------------------------------------------
 
-const tabs = new Map(); // id -> { pty, cwd, title, sessionId }
+const tabs = new Map(); // id -> { pty, cwd, title, sessionId, feed }
 let nextTab = 1;
 
 // If LemonCode was started from inside another Claude session (e.g. the desktop app), that session's
@@ -158,7 +160,7 @@ function spawnClaude({ cwd, title, prompt, resume, agentIds = [] }) {
   const tab = spawnTerminal({ title, cwd, file: exe, args });
   const t = tabs.get(tab.id);
   t.agentIds = helpers.map((a) => a.id);
-  if (resume) t.sessionId = resume;
+  if (resume) followSession(tab.id, resume);
   return { ...tab, sessionId: resume || null, agents: helpers.map((a) => ({ key: a.key, name: a.name })) };
 }
 
@@ -201,8 +203,44 @@ function spawnTerminal({ title, cwd, file, args }) {
   const tab = { pty: p, cwd, title, sessionId: null };
   tabs.set(id, tab);
   p.onData((d) => send('pty:data', id, d));
-  p.onExit(({ exitCode }) => { tabs.delete(id); send('pty:exit', id, exitCode); });
+  p.onExit(({ exitCode }) => {
+    if (tab.feed) tab.feed.stop();
+    tabs.delete(id);
+    send('pty:exit', id, exitCode);
+  });
   return { id, cwd, title };
+}
+
+// The chat view follows the tab's transcript. The id can change mid-tab (e.g. /clear starts a new
+// session), and then the chat starts again from the new transcript.
+function followSession(tabId, sessionId) {
+  const tab = tabs.get(tabId);
+  if (!tab || (tab.feed && tab.feed.sessionId === sessionId)) return;
+  if (!SESSION_ID.test(sessionId)) return; // it ends up in a file path, and comes from a local HTTP post
+  if (tab.feed) tab.feed.stop();
+  tab.sessionId = sessionId;
+  tab.chat = [];
+  tab.feed = new ChatFeed(sessionId);
+  let first = true;
+  tab.feed.on('messages', (messages) => {
+    const start = tab.chat.length; // lets the page skip what it already got from chat:history
+    tab.chat.push(...messages);
+    send('chat', tabId, messages, start, first);
+    first = false;
+  });
+  tab.feed.start();
+}
+const SESSION_ID = /^[\w-]+$/;
+
+// Text from the chat box goes in as a bracketed paste, so newlines stay newlines instead of sending early.
+// Enter follows a moment later as its own write, so it reads as "send" and not as part of the paste.
+const PASTE_SETTLE_MS = 60;
+function sendChat(tabId, text) {
+  const tab = tabs.get(tabId);
+  if (!tab || !text) return;
+  const pasted = text.replace(/\x1b\[20[01]~/g, ''); // a paste marker inside the text would end the paste early
+  tab.pty.write(`\x1b[200~${pasted}\x1b[201~`);
+  setTimeout(() => { if (tabs.has(tabId)) tab.pty.write('\r'); }, PASTE_SETTLE_MS);
 }
 
 // ---- git ------------------------------------------------------------------
@@ -370,6 +408,9 @@ ipcMain.handle('dialog:folder', async () => {
 });
 
 ipcMain.on('pty:write', (_e, id, data) => { const t = tabs.get(id); if (t) t.pty.write(data); });
+ipcMain.on('chat:send', (_e, id, text) => sendChat(id, String(text || '')));
+// A resumed session's history is read before the page has made its tab, so the page asks for it.
+ipcMain.handle('chat:history', (_e, id) => { const t = tabs.get(id); return t && t.chat ? t.chat : []; });
 ipcMain.on('pty:resize', (_e, id, cols, rows) => {
   const t = tabs.get(id);
   if (t && cols > 1 && rows > 1) { try { t.pty.resize(cols, rows); } catch { /* exited */ } }

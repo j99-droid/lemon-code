@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('lemon', {
   write: (id, data) => ipcRenderer.send('pty:write', id, data),
   resize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
   kill: (id) => ipcRenderer.invoke('pty:kill', id),
+  sendChat: (id, text) => ipcRenderer.send('chat:send', id, text),
+  chatHistory: (id) => ipcRenderer.invoke('chat:history', id),
 
   gitStatus: (id) => ipcRenderer.invoke('git:status', id),
   complete: (id, message) => ipcRenderer.invoke('complete', { id, message }),
@@ -30,6 +32,7 @@ contextBridge.exposeInMainWorld('lemon', {
 
   onData: on('pty:data'),
   onExit: on('pty:exit'),
+  onChat: on('chat'),
   onHook: on('hook'),
   onUsage: on('usage'),
   onAssistantText: on('assistant-text'),

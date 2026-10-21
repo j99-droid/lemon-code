@@ -37,6 +37,11 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
 - **Tabs**: ⌂ New project (home) first, then one tab per running session (dot = Citron's state for it, plus
   how many helpers are working). **⋯** opens **Agents** (make, edit, delete helpers; "Add starter team"),
   **Recent** (all Claude Code sessions to reopen or archive) and **Archived projects**.
+- **Chat view** (each session opens in it): only what you and Claude say, as chat bubbles. Tool calls, their
+  output and helper work are left out. Type in the box at the bottom: Enter sends, Shift+Enter is a new line, Esc
+  stops Claude, and pasting an image adds it to your next message. **Terminal** in the session header switches
+  to Claude's real terminal and back. The terminal opens by itself when Claude needs you there (an approval, a
+  question, sign-in or "trust this folder?") and goes back to chat once that's answered.
 - **Model / Effort / Mode**: for the main Claude, applied to sessions started after you change them.
 - **Meter**: today's tokens against a daily budget (your 14-day average until you set one), the 5-hour window
   reset time, 7-day average, today's projection and a 7-day chart. Counts every Claude Code session, desktop
@@ -50,8 +55,10 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
 ## Files
 | File | What it does |
 |---|---|
-| `src/main.js` | Window, Claude terminals (node-pty), hook listener, git, project creation |
+| `src/main.js` | Window, Claude terminals (node-pty), chat feeds, hook listener, git, project creation |
 | `src/usage.js` | Reads transcripts for token totals, 5h window and the session list |
+| `src/chat.js` | Follows one session's transcript and picks out the chat messages for the chat view |
+| `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |
 | `src/templates.js` | Folder naming, prompt building, AGENTS.md skeleton |
 | `AGENTS.md` / `CLAUDE.md` | Rules for AI agents working on this repo (`CLAUDE.md` just loads `AGENTS.md`) |

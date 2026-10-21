@@ -7,6 +7,9 @@ project templates. How it works and the file map: README.md.
 - `npm start` from this folder, or the Desktop "LemonCode" shortcut (`npm run shortcut` rebuilds it).
 - After editing anything in `src/`, restart the app; there is no hot reload.
 - Debug: `npx electron . --remote-debugging-port=9333`, then talk to the page over CDP (screenshot, evaluate).
+  Add `--user-data-dir=<temp folder>` to test next to a running LemonCode: it gets its own config and hooks file
+  (it copies the old `lemon-code` config once, read-only).
+- `npm test` runs the transcript-parsing tests in `test/`.
 
 ## Rules
 - It runs the real `claude.exe` (`~/.local/bin`, native installer) in a terminal, not the Agent SDK: users sign in
@@ -44,3 +47,15 @@ project templates. How it works and the file map: README.md.
 - The data folder follows package.json's `name`. It was `%APPDATA%\lemon-code` before the LemonCode rename;
   `main.js` copies the old `config.json` across once. Check for the file, not the folder: Electron can create
   the new folder before `main.js` runs (seen when testing with `app.setPath('appData')`).
+- The chat view reads the transcript, not the terminal. Transcripts also hold `api-request-blob` lines (system
+  prompt text) and user lines that are really tool results or command echoes; `chatMessage()` only keeps
+  `user`/`assistant` lines with real text. Add a test in `test/chat.test.js` for any new line type you hide.
+- On `--resume` the whole history is read before the page has made the tab, so main keeps each tab's messages
+  and the page fetches them (`chat:history`). Attach the feed's listener before `start()`.
+- Approvals, questions, sign-in and the trust prompt can only be answered in the terminal, so the page switches
+  to it for those and back after. Sign-in and trust fire no hooks: it opens the terminal if `SessionStart`
+  hasn't come within 6 s.
+- Open approvals are tracked by `tool_use_id` (PreToolUse/PostToolUse have it). `PermissionRequest` has none,
+  so it's matched to the running call by tool + input. Denying (Esc) fires no hook at all: Esc in the
+  terminal and the Chat button count as the answer. Tested with Ask first mode and Haiku.
+- In the page, `.ask` is the home type box's class: don't reuse it for chat bubbles.
