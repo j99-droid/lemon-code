@@ -25,7 +25,7 @@
   // The local one runs on this PC through Ollama (see src/router.js); the name must match LOCAL_MODEL there.
   const MODEL_NAMES = {
     inherit: 'Same as main', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku',
-    'lemon-qwen3-coder': 'Local: Qwen3 Coder',
+    'lemon-gpt-oss-20b': 'Local: GPT-OSS 20B',
   };
   const EFFORT_NAMES = { inherit: 'Same as main', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
 
@@ -686,7 +686,7 @@
     $('meterPop').innerHTML = `
       <div class="pop-big">${fmt(u.today.main)}<small>${b ? `of ${fmt(b)} today` : 'today'}</small></div>
       <div class="pop-sub">+ ${fmt(u.today.cacheRead)} cache reads (cheap, not counted) · in ${fmt(u.today.input)} · out ${fmt(u.today.output)} · cache writes ${fmt(u.today.cacheWrite)}</div>
-      <div class="pop-sub">Local model (Qwen3 Coder, this PC): ${fmt(u.localToday.main)} today · 5h window ${u.localWindow ? `${fmt(u.localWindow.main)}, resets in ${until(u.localWindow.end)}` : 'not started'}. Kept out of the numbers above.</div>
+      <div class="pop-sub">Local model (GPT-OSS 20B, this PC): ${fmt(u.localToday.main)} today · 5h window ${u.localWindow ? `${fmt(u.localWindow.main)}, resets in ${until(u.localWindow.end)}` : 'not started'}. Kept out of the numbers above.</div>
       <div class="pop-grid">
         <div class="pop-stat"><b>${w ? until(w.end) : '–'}</b><span>${w ? `until the 5h window resets · ${fmt(w.main)} used` : '5h window not started'}</span></div>
         <div class="pop-stat"><b style="color:${projColour}">${fmt(u.projection)}</b><span>today at this pace</span></div>

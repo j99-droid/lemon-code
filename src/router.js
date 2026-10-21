@@ -7,7 +7,7 @@ const https = require('https');
 
 // The name helpers use, and the name `ollama create` gives the model (tools/local-model/Modelfile). The Modelfile
 // raises the context window, because Claude Code's prompts don't fit Ollama's default.
-const LOCAL_MODEL = 'lemon-qwen3-coder';
+const LOCAL_MODEL = 'lemon-gpt-oss-20b';
 const OLLAMA = { protocol: 'http:', host: '127.0.0.1', port: 11434 };
 const ANTHROPIC = { protocol: 'https:', host: 'api.anthropic.com', port: 443 };
 const MAX_BODY_BYTES = 32 * 1024 * 1024;

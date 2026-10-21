@@ -26,15 +26,15 @@ sessions LemonCode starts are sent to it, but it has no password, so other progr
 
 ## Local helpers (optional)
 A helper can run on a model on your PC instead of Claude. It needs [Ollama](https://ollama.com) (0.14 or newer) and
-the Qwen3 Coder model, made once:
+the GPT-OSS 20B model, made once:
 ```
-ollama pull qwen3-coder:30b
-ollama create lemon-qwen3-coder -f tools/local-model/Modelfile
+ollama pull gpt-oss:20b
+ollama create lemon-gpt-oss-20b -f tools/local-model/Modelfile
 ```
-Then pick **Local: Qwen3 Coder** as a helper's model. Only sessions with a local helper use the local router
+Then pick **Local: GPT-OSS 20B** as a helper's model. Only sessions with a local helper use the local router
 (`src/router.js`): it sends that helper's calls to Ollama and everything else to Anthropic, so your Claude sign-in
 is unchanged. The main Claude is always Claude. Ollama must be running when the helper is used (it runs in the
-tray after install). The model needs about 19 GB of disk and runs best with 16 GB of GPU memory or more.
+tray after install). The model is about 13 GB and fits fully in 16 GB of GPU memory.
 
 ## What's on screen
 - **Type box** (home page): type what you want, press Enter. With **Blank** picked, LemonCode makes a folder in
@@ -76,7 +76,7 @@ tray after install). The model needs about 19 GB of disk and runs best with 16 G
 | `test/chat.test.js` | Tests for which transcript lines the chat view shows (`npm test`) |
 | `src/router.js` | Local model router: sends a local helper's calls to Ollama, the rest to Anthropic |
 | `test/router.test.js` | Tests for where the router sends each call (`npm test`) |
-| `tools/local-model/Modelfile` | Makes the `lemon-qwen3-coder` model with a 32K context (see Local helpers) |
+| `tools/local-model/Modelfile` | Makes the `lemon-gpt-oss-20b` model with a 32K context (see Local helpers) |
 | `src/hook.js` | Hook command: forwards Claude's hook JSON to the app |
 | `src/templates.js` | Folder naming, prompt building, AGENTS.md skeleton |
 | `src/power.js` | The model and effort slider lists, in slider order, and the defaults |
