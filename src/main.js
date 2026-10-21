@@ -188,10 +188,14 @@ function agentsJson(helpers, localOnly) {
     if (localOnly) def.model = LOCAL_MODEL; // Claude model names would have no account to run on
     else if (a.model && a.model !== 'inherit') def.model = a.model;
     if (a.effort && a.effort !== 'inherit') def.effort = a.effort;
+    // Every tool definition is sent with each call. A local model has a 32K context, so it gets only what coding needs.
+    if (a.model === LOCAL_MODEL) def.tools = LOCAL_HELPER_TOOLS;
     out[a.key] = def;
   }
   return out;
 }
+
+const LOCAL_HELPER_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'];
 
 function helperHint(helpers) {
   const list = helpers.map((a) => `${a.key} (${a.role})`).join('; ');

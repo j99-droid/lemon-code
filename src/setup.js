@@ -8,7 +8,7 @@ const { execFileSync } = require('child_process');
 const { OLLAMA, LOCAL_MODEL } = require('./router');
 
 // The base model the Modelfile builds from (its FROM line). Keep the two in step.
-const LOCAL_BASE_MODEL = 'qwen3-coder:30b';
+const LOCAL_BASE_MODEL = 'gpt-oss:20b';
 const MODELFILE = path.join(__dirname, '..', 'tools', 'local-model', 'Modelfile');
 // Winget is built into Windows 10 and 11. The page is the fallback when it's missing.
 const OLLAMA_INSTALL_COMMAND = 'winget install --id Ollama.Ollama -e --accept-package-agreements --accept-source-agreements';
@@ -26,7 +26,7 @@ function ollamaExe() {
   try { return execFileSync('where', ['ollama'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim() || null; } catch { return null; }
 }
 
-// Model names the server lists look like "lemon-qwen3-coder:latest".
+// Model names the server lists look like "lemon-gpt-oss-20b:latest".
 function hasLocalModel(names) {
   return names.some((name) => name.split(':')[0] === LOCAL_MODEL);
 }

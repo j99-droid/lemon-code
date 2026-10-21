@@ -57,7 +57,7 @@ test('PowerShell quoting doubles single quotes', () => {
 
 test('the model script pulls the base model, then builds the local one from the Modelfile', () => {
   const script = modelSetupScript('C:\\Programs\\ollama.exe');
-  assert.match(script, /& 'C:\\Programs\\ollama\.exe' pull qwen3-coder:30b;/);
+  assert.match(script, /& 'C:\\Programs\\ollama\.exe' pull gpt-oss:20b;/);
   assert.match(script, new RegExp(`create ${LOCAL_MODEL} -f '.*tools[\\\\/]local-model[\\\\/]Modelfile'`));
   assert.ok(script.includes('if ($?)'), 'a failed pull must stop the create step');
 });
